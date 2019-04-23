@@ -5,12 +5,12 @@ import math
 import numpy as np
 from pathlib import Path
 from geometry import cross
+from geometry import modulus
 
-print(math.fabs(cross(1, 3, 4, 5)))
-print(cross(4, 5, 1, 3))
+# print(math.fabs(cross(1, 3, 4, 5)))
+# print(cross(4, 5, 1, 3))
 
-if True:
-    quit("quitting debug...")
+
 
 # import matplotlib.pyplot as plt
 # import matplotlib.image as mpimg
@@ -18,9 +18,10 @@ if True:
 # import matplotlib.pyplot
 # matplotlib.rcParams['interactive'] == True
 
-MIN_LINE_LENGTH = 100
+MIN_LINE_LENGTH = 50
 MAX_LINE_GAP = 5
 GAUSS_BLUR = 9
+SMALL_POSITIVE_INTENSITY = 0.0001
 
 try:
     img_path = sys.argv[1]
@@ -63,6 +64,8 @@ h, w, l = img_color.shape
 img_color = cv2.copyMakeBorder(img_color, int(h / 2), int(h / 2), int(w / 2), int(w / 2), cv2.BORDER_CONSTANT, value=[255, 255, 255])
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_input.jpg"), img_color)
 
+
+h_ext, w_ext, l_ext = img_color.shape
 
 # Convert to gray-scale
 img_gray = cv2.cvtColor(img_color, cv2.COLOR_BGR2GRAY)
@@ -124,33 +127,137 @@ if lines is None or len(lines) == 0:
     quit("error: no lines extracted")
 
 # Draw lines on the image
-# img_lines = img_color
+viz_lines = img_color.copy()
 
-l_min = math.inf
-l_max = -math.inf
-count = 0
+l_min, l_max = [math.inf, -math.inf]
+x_min, x_max = [math.inf, -math.inf]
+y_min, y_max = [math.inf, -math.inf]
+
+# count = 0
 for line in lines:
     x1, y1, x2, y2 = line[0]
+
     l = math.sqrt(pow(x1-x2, 2) + pow(y1-y2,2))
-    l_min = l if l < l_min else l_min
-    l_max = l if l > l_max else l_max
-    count += 1
-    cv2.line(img_color, (x1, y1), (x2, y2), (0, 255, 255), 2)
 
-print("found", len(lines), "lines, with length range", "{0:.2f}".format(l_min), " - ", l_max)
-print("count=", count)
+    l_min = min(l_min, l)
+    l_max = max(l_max, l)
+
+    x_min = min(x_min, min(x1, x2))
+    x_max = max(x_max, max(x1, x2))
+
+    y_min = min(y_min, min(y1, y2))
+    y_max = max(y_max, max(y1, y2))
+
+    # count += 1
+    cv2.line(viz_lines, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+
+print(len(lines), "lines, with length range", "{0:.2f}".format(l_min), " - ", "{0:.2f}".format(l_max))
+print("x range", "{0:.2f}".format(x_min), " - ", "{0:.2f}".format(x_max))
+print("y range", "{0:.2f}".format(y_min), " - ", "{0:.2f}".format(y_max))
+
+
 # Export result
-cv2.imwrite(os.path.join(out_dir_path, img_name + "_lines.jpg"), img_color)
+cv2.imwrite(os.path.join(out_dir_path, img_name + "_lines.jpg"), viz_lines)
 
-def intersections(lines):
-  print("Hello from a function")
 
-#
-for i in range(len(lines)):
-  # print(x)
-  my_function()
-else:
-  print("Finally finished!")
+def get_angles(lines, nr_angles):
+    for i in range(len(lines)):
+        px, py, rx, ry = lines[i][0]
+        rx = rx - px
+        ry = ry - py
+        r_mod = modulus(rx, ry)
+        alpha = math.floor(math.acos(rx / r_mod) / (math.pi / nr_angles))
+        print(alpha)
+
+
+get_angles(lines, 40)
+
+
+
+
+
+if True:
+    quit("quitting debug...")
+
+# https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
+def get_intersections(lines):
+    intersection_coord = []
+    intersection_weight = []
+    count = 0
+
+    lines_count = len(lines)
+
+    for i in range(lines_count):
+        px, py, rx, ry = lines[i][0]  # read line endpoints
+        rx = rx - px
+        ry = ry - py
+        r_mod = modulus(rx, ry)
+
+        for j in range(i+1, lines_count):
+            qx, qy, sx, sy = lines[j][0]
+            sx = sx - qx
+            sy = sy - qy
+            s_mod = modulus(sx, sy)
+
+            r_x_s = cross(rx, ry, sx, sy)
+
+            if math.fabs(r_x_s) > SMALL_POSITIVE_INTENSITY:
+
+                # compute location
+                qpx = qx - px
+                qpy = qy - py
+
+                qp_x_s = cross(qpx, qpy, sx, sy)
+                t = qp_x_s / r_x_s
+
+                qp_x_r = cross(qpx, qpy, rx, ry)
+                u = qp_x_r / r_x_s
+
+                if 0 <= t <= 1 or 0 <= u <= 1:
+                    continue
+
+                isec_x = px + t * rx  # intersection
+                isec_y = py + t * ry
+
+                # isec2_x = qx + u * sx # intersection ver. 2
+                # isec2_y = qy + u * sy
+
+                # print("d=", modulus(isec_x - isec2_x, isec_y - isec2_y))
+
+                # add if it is within the boundaries of the extended image
+                if 0 <= isec_x < w_ext and 0 <= isec_y < h_ext:
+                    count += 1
+                    intersection_coord.append([isec_x, isec_y])
+                    intersection_weight.append(r_mod + s_mod)
+
+
+    return intersection_coord, intersection_weight
+
+Ixy, Iw = get_intersections(lines)
+
+print(len(Ixy), "intersections found")
+
+viz_isec = img_color
+
+for i in range(len(Ixy)):
+    x = int(Ixy[i][0])
+    y = int(Ixy[i][1])
+    cv2.circle(viz_isec, (x, y), int(5), (0, 0, 255), 3)
+
+# cv2.circle(viz_isec, (int(w_ext/2), int(h_ext/2)), int(w_ext/2), (0, 0, 255), 2)
+
+# Export result
+cv2.imwrite(os.path.join(out_dir_path, img_name + "_intersections.jpg"), viz_isec)
+
+
+
+
+
+
+
+
+
 
 
 
