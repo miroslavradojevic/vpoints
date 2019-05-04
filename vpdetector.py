@@ -171,7 +171,10 @@ def get_angles(lines, nr_angles):
         print(alpha)
 
 
-get_angles(lines, 40)
+# get_angles(lines, 40)
+
+
+
 
 
 
