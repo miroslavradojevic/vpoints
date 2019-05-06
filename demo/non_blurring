@@ -1,0 +1,85 @@
+void non_blurring(vector<Node> nX, vector<Node>& nY, float SIG2RAD, int MAXITER, float EPSILON2) {
+
+    // mean-shift (non-blurring) uses flexible neighbourhood scaled with respect to the node's sigma
+
+    int checkpoint = round(nX.size()/10.0);
+
+    float conv[4], next[4]; // x y z sig
+
+    nY.clear();
+    nY = nX;
+
+    float x2, y2, z2, d2, r2;
+    int iter, cnt;
+
+    for (long i = 1; i < nY.size(); ++i) {
+
+        if (i%checkpoint==0) cout << (i/checkpoint)*10 << "%  " << flush;
+
+        // refine nX[i] node location and scale and store the result in nY[i]
+//        if (nY[i].type==Node::SOMA) continue; // do not refine soma nodes
+
+        conv[0] = nX[i].x;
+        conv[1] = nX[i].y;
+        conv[2] = nX[i].z;
+        conv[3] = nX[i].sig;
+
+        iter = 0;
+
+        do {
+            cnt = 0;
+
+            next[0] = 0;        // local mean is the follow-up location
+            next[1] = 0;
+            next[2] = 0;
+            next[3] = 0;
+
+            r2 = pow(SIG2RAD * conv[3],2);
+
+            for (long j = 1; j < nX.size(); ++j) {
+//                if (nX[j].type==Node::SOMA) continue; // don't use soma nodes in refinement
+                x2 = pow(nX[j].x-conv[0],2);
+                if (x2<=r2) {
+                    y2 = pow(nX[j].y-conv[1],2);
+                    if (x2+y2<=r2) {
+                        z2 = pow(nX[j].z-conv[2],2);
+                        if (x2+y2+z2<=r2) {
+                            next[0] += nX[j].x;
+                            next[1] += nX[j].y;
+                            next[2] += nX[j].z;
+                            next[3] += nX[j].sig;
+                            cnt++;
+                        }
+                    }
+                }
+            }
+
+//            if (cnt==0) cout << "WRONG!!!" << endl;
+
+            next[0] /= cnt; // cnt > 0, at least node location itself will be in the kernel neighbourhood
+            next[1] /= cnt;
+            next[2] /= cnt;
+            next[3] /= cnt;
+
+            d2 = pow(next[0]-conv[0],2) + pow(next[1]-conv[1],2) + pow(next[2]-conv[2],2);
+
+            conv[0] = next[0]; // for the next iteration
+            conv[1] = next[1];
+            conv[2] = next[2];
+            conv[3] = next[3];
+
+            iter++;
+
+        }
+        while (iter<MAXITER && d2>EPSILON2);
+
+        nY[i].x     = conv[0];
+        nY[i].y     = conv[1];
+        nY[i].z     = conv[2];
+        nY[i].sig   = conv[3];
+
+    } // go through nY[i], initiate with nX[i] values and refine by mean-shift averaging
+
+    cout << endl;
+
+}

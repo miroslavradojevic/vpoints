@@ -6,10 +6,11 @@ import numpy as np
 from pathlib import Path
 from geometry import cross
 from geometry import modulus
+from scipy import ndimage
+import matplotlib.pyplot as plt
 
 # print(math.fabs(cross(1, 3, 4, 5)))
 # print(cross(4, 5, 1, 3))
-
 
 
 # import matplotlib.pyplot as plt
@@ -18,7 +19,8 @@ from geometry import modulus
 # import matplotlib.pyplot
 # matplotlib.rcParams['interactive'] == True
 
-MIN_LINE_LENGTH = 50
+MIN_LINE_LENGTH = 100
+MIN_SIZE_CONN_COMPONENT = 100
 MAX_LINE_GAP = 5
 GAUSS_BLUR = 9
 SMALL_POSITIVE_INTENSITY = 0.0001
@@ -41,10 +43,8 @@ if not os.path.isfile(img_path) or not Path(img_path).suffix == '.jpg':
 # Read color image
 img_color = cv2.imread(img_path, cv2.IMREAD_COLOR)
 
-
 img_name = os.path.splitext(os.path.basename(img_path))[0]
 print("Read image", img_name, "\t", type(img_color), "\tdimensions:", img_color.shape)
-
 
 # Create directory with exported results
 img_dir = os.path.dirname(img_path)
@@ -61,9 +61,9 @@ if not os.path.exists(out_dir_path):
 h, w, l = img_color.shape
 
 # Extend image
-img_color = cv2.copyMakeBorder(img_color, int(h / 2), int(h / 2), int(w / 2), int(w / 2), cv2.BORDER_CONSTANT, value=[255, 255, 255])
+img_color = cv2.copyMakeBorder(img_color, int(h / 2), int(h / 2), int(w / 2), int(w / 2), cv2.BORDER_CONSTANT,
+                               value=[255, 255, 255])
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_input.jpg"), img_color)
-
 
 h_ext, w_ext, l_ext = img_color.shape
 
@@ -78,6 +78,7 @@ cv2.imwrite(os.path.join(out_dir_path, img_name + "_uint8.jpg"), img_gray)
 # Find the edges in the image using canny detector
 img_edges = cv2.Canny(img_gray, min_val_canny, max_val_canny)
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_canny_before.jpg"), img_edges)
+del img_gray
 
 # Crop the border edges caused by the image extension
 
@@ -94,34 +95,47 @@ cv2.fillPoly(mask, points, 255)
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_mask.jpg"), mask)
 
 # Apply mask to original image
-img_edges = cv2.bitwise_and(img_edges, img_edges, mask = mask)
+img_edges = cv2.bitwise_and(img_edges, img_edges, mask=mask)
+del mask
 
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_canny_after.jpg"), img_edges)
 
-# Remove small components
-# #find all your connected components (white blobs in your image)
-# nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(img, connectivity=8)
-# #connectedComponentswithStats yields every seperated component with information on each of them, such as size
-# #the following part is just taking out the background which is also considered a component, but most of the time we don't want that.
-# sizes = stats[1:, -1]; nb_components = nb_components - 1
-#
-# # minimum size of particles we want to keep (number of pixels)
-# #here, it's a fixed value, but you can set it as you want, eg the mean of the sizes or whatever
-# min_size = 150
-#
-# #your answer image
-# img2 = np.zeros((output.shape))
-# #for every component in the image, you keep it only if it's above min_size
-# for i in range(0, nb_components):
-#     if sizes[i] >= min_size:
-#         img2[output == i + 1] = 255
+img_edges = ((img_edges > 124).astype(int) * 255).astype(np.uint8)  # 0 and 255 only
+
+labeled, nr_objects = ndimage.label(img_edges)
+
+nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(img_edges, connectivity=8)
+sizes = stats[1:, -1]
+nb_components = nb_components - 1
+
+# print(nr_objects, "", nb_components, "", stats.shape, "", sizes.shape)
+
+img2 = np.zeros(img_edges.shape, dtype=np.uint8)
+
+# for label in range(nr_objects):
+#     sys.stdout.write("pruning components: %d%%   \r" % (100 * (label + 1) / nr_objects))
+#     sys.stdout.flush()
+#     if np.sum(labeled == label + 1) >= MIN_SIZE_CONN_COMPONENT:
+#         img2[labeled == label + 1] = 255
+
+for i in range(nb_components):
+    if sizes[i] >= MIN_SIZE_CONN_COMPONENT:
+        img2[output == i + 1] = 255
+
+img_edges = img2
+del img2
+
+cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_canny_after_refined.jpg"), img_edges)
+
+# if True:
+#     quit("done")
 
 # Blur the edge image
-img_edges = cv2.GaussianBlur(img_edges, (GAUSS_BLUR, GAUSS_BLUR),0)
+img_edges = cv2.GaussianBlur(img_edges, (GAUSS_BLUR, GAUSS_BLUR), 0)
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_blurred.jpg"), img_edges)
 
 # Detect points that form a line
-lines = cv2.HoughLinesP(img_edges, 1, np.pi / 180, threshold_hough, MAX_LINE_GAP, MIN_LINE_LENGTH)
+lines = cv2.HoughLinesP(img_edges, 1, np.pi / 90, threshold_hough, MAX_LINE_GAP, MIN_LINE_LENGTH)
 
 if lines is None or len(lines) == 0:
     quit("error: no lines extracted")
@@ -137,7 +151,7 @@ y_min, y_max = [math.inf, -math.inf]
 for line in lines:
     x1, y1, x2, y2 = line[0]
 
-    l = math.sqrt(pow(x1-x2, 2) + pow(y1-y2,2))
+    l = math.sqrt(pow(x1 - x2, 2) + pow(y1 - y2, 2))
 
     l_min = min(l_min, l)
     l_max = max(l_max, l)
@@ -151,14 +165,13 @@ for line in lines:
     # count += 1
     cv2.line(viz_lines, (x1, y1), (x2, y2), (0, 255, 255), 2)
 
-
 print(len(lines), "lines, with length range", "{0:.2f}".format(l_min), " - ", "{0:.2f}".format(l_max))
 print("x range", "{0:.2f}".format(x_min), " - ", "{0:.2f}".format(x_max))
 print("y range", "{0:.2f}".format(y_min), " - ", "{0:.2f}".format(y_max))
 
-
 # Export result
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_lines.jpg"), viz_lines)
+del viz_lines
 
 
 def get_angles(lines, nr_angles):
@@ -172,16 +185,6 @@ def get_angles(lines, nr_angles):
 
 
 # get_angles(lines, 40)
-
-
-
-
-
-
-
-
-if True:
-    quit("quitting debug...")
 
 # https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
 def get_intersections(lines):
@@ -197,7 +200,7 @@ def get_intersections(lines):
         ry = ry - py
         r_mod = modulus(rx, ry)
 
-        for j in range(i+1, lines_count):
+        for j in range(i + 1, lines_count):
             qx, qy, sx, sy = lines[j][0]
             sx = sx - qx
             sy = sy - qy
@@ -226,16 +229,14 @@ def get_intersections(lines):
                 # isec2_x = qx + u * sx # intersection ver. 2
                 # isec2_y = qy + u * sy
 
-                # print("d=", modulus(isec_x - isec2_x, isec_y - isec2_y))
-
                 # add if it is within the boundaries of the extended image
                 if 0 <= isec_x < w_ext and 0 <= isec_y < h_ext:
                     count += 1
                     intersection_coord.append([isec_x, isec_y])
                     intersection_weight.append(r_mod + s_mod)
 
-
     return intersection_coord, intersection_weight
+
 
 Ixy, Iw = get_intersections(lines)
 
@@ -246,24 +247,11 @@ viz_isec = img_color
 for i in range(len(Ixy)):
     x = int(Ixy[i][0])
     y = int(Ixy[i][1])
-    cv2.circle(viz_isec, (x, y), int(5), (0, 0, 255), 3)
+    cv2.circle(viz_isec, (x, y), int(10), (0, 0, 255), 5)
 
-# cv2.circle(viz_isec, (int(w_ext/2), int(h_ext/2)), int(w_ext/2), (0, 0, 255), 2)
-
-# Export result
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_intersections.jpg"), viz_isec)
+del viz_isec
 
-
-
-
-
-
-
-
-
-
-
-
-
+# mean-shift intersections
 
 

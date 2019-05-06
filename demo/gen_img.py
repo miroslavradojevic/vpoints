@@ -49,8 +49,8 @@ for x in range(0, H):
 
 px = 55
 py = 55
-rx = 300
-ry = 300
+rx = 250
+ry = 250
 vx, vy = direction(px, py, rx, ry)
 
 for x in range(0, H):

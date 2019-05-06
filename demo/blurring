@@ -1,0 +1,101 @@
+void refine_blurring(vector<Node> nX, vector<Node>& nY, float SIG2RAD, int MAXITER, float EPSILON2) {
+    // TODO blurring should work for all node types!! including soma
+    int checkpoint = round(nX.size()/10.0);
+
+    float conv[nX.size()][4]; // fix allocation as it can happen that size exceeds int range
+    float next[nX.size()][4];
+
+    for (long i = 1; i < nX.size(); ++i) {
+        conv[i][0] = nX[i].x;
+        conv[i][1] = nX[i].y;
+        conv[i][2] = nX[i].z;
+        conv[i][3] = nX[i].sig;
+    }
+
+    float x2, y2, z2, d2, d2_max, r2;
+    int iter = 0;
+    int cnt = 0;
+
+    do {
+
+        cout << "iter = " << iter << endl;
+
+        // each iteration will shift the whole sample = blurring
+        d2_max = -FLT_MAX;
+
+        for (long i = 1; i < nX.size(); ++i) {
+
+            if (i%checkpoint==0) cout << (i/checkpoint)*10 << "%  " << flush;
+
+            if (nX[i].type==Node::SOMA) { // skip the ms iterations for soma nodes
+                next[i][0] = conv[i][0];
+                next[i][1] = conv[i][1];
+                next[i][2] = conv[i][2];
+                next[i][3] = conv[i][3];
+            }
+            else { // do not use soma nodes for averaging the trace nodes
+
+                cnt = 0;  // count neighbours
+
+                next[i][0] = 0;
+                next[i][1] = 0;
+                next[i][2] = 0;
+                next[i][3] = 0;
+
+                r2 = pow(SIG2RAD * conv[i][3],2);
+
+                for (long j = 1; j < nX.size(); ++j) {
+                    if (nX[j].type!=Node::SOMA) {
+                        x2 = pow(conv[j][0]-conv[i][0],2);
+                        if (x2<=r2) {
+                            y2 = pow(conv[j][1]-conv[i][1],2);
+                            if (x2+y2<=r2) {
+                                z2 = pow(conv[j][2]-conv[i][2],2);
+                                if (x2+y2+z2<=r2) {
+                                    next[i][0] += conv[j][0];
+                                    next[i][1] += conv[j][1];
+                                    next[i][2] += conv[j][2];
+                                    next[i][3] += conv[j][3];
+                                    cnt++;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                next[i][0] /= cnt;
+                next[i][1] /= cnt;
+                next[i][2] /= cnt;
+                next[i][3] /= cnt;
+
+            }
+
+            d2 = pow(next[i][0]-conv[i][0],2) + pow(next[i][1]-conv[i][1],2) + pow(next[i][2]-conv[i][2],2);
+            if (d2>d2_max)
+                d2_max = d2;
+
+            conv[i][0] = next[i][0];
+            conv[i][1] = next[i][1];
+            conv[i][2] = next[i][2];
+            conv[i][3] = next[i][3];
+
+        }
+
+        cout << endl;
+
+        iter++;
+
+    }
+    while(iter<MAXITER && d2_max>EPSILON2);
+
+    nY.clear();
+    nY = nX;
+
+    for (long i = 1; i < nY.size(); ++i) {
+        nY[i].x = conv[i][0];
+        nY[i].y = conv[i][1];
+        nY[i].z = conv[i][2];
+        nY[i].sig = conv[i][3];
+    }
+
+}
