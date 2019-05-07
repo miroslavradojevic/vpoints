@@ -304,7 +304,8 @@ del viz_isec  # release memory
 # print("\ndone")
 
 #######################################
-# create cummulative image of intersections
+# create cumulative image of intersection locations
+
 
 
 
@@ -312,5 +313,9 @@ del viz_isec  # release memory
 # cluster converged points
 
 
+
+
 #######################################
 # pick vanishing points
+
+
