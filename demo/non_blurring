@@ -1,9 +1,5 @@
 void non_blurring(vector<Node> nX, vector<Node>& nY, float SIG2RAD, int MAXITER, float EPSILON2) {
 
-    // mean-shift (non-blurring) uses flexible neighbourhood scaled with respect to the node's sigma
-
-    int checkpoint = round(nX.size()/10.0);
-
     float conv[4], next[4]; // x y z sig
 
     nY.clear();
@@ -13,11 +9,6 @@ void non_blurring(vector<Node> nX, vector<Node>& nY, float SIG2RAD, int MAXITER,
     int iter, cnt;
 
     for (long i = 1; i < nY.size(); ++i) {
-
-        if (i%checkpoint==0) cout << (i/checkpoint)*10 << "%  " << flush;
-
-        // refine nX[i] node location and scale and store the result in nY[i]
-//        if (nY[i].type==Node::SOMA) continue; // do not refine soma nodes
 
         conv[0] = nX[i].x;
         conv[1] = nX[i].y;
@@ -37,7 +28,6 @@ void non_blurring(vector<Node> nX, vector<Node>& nY, float SIG2RAD, int MAXITER,
             r2 = pow(SIG2RAD * conv[3],2);
 
             for (long j = 1; j < nX.size(); ++j) {
-//                if (nX[j].type==Node::SOMA) continue; // don't use soma nodes in refinement
                 x2 = pow(nX[j].x-conv[0],2);
                 if (x2<=r2) {
                     y2 = pow(nX[j].y-conv[1],2);
@@ -53,8 +43,6 @@ void non_blurring(vector<Node> nX, vector<Node>& nY, float SIG2RAD, int MAXITER,
                     }
                 }
             }
-
-//            if (cnt==0) cout << "WRONG!!!" << endl;
 
             next[0] /= cnt; // cnt > 0, at least node location itself will be in the kernel neighbourhood
             next[1] /= cnt;
@@ -79,7 +67,4 @@ void non_blurring(vector<Node> nX, vector<Node>& nY, float SIG2RAD, int MAXITER,
         nY[i].sig   = conv[3];
 
     } // go through nY[i], initiate with nX[i] values and refine by mean-shift averaging
-
-    cout << endl;
-
 }
