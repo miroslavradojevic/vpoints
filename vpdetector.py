@@ -2,6 +2,7 @@ import os
 import sys
 import cv2
 import math
+import time
 import numpy as np
 from pathlib import Path
 from geometry import cross
@@ -166,10 +167,10 @@ print("Read image", img_name, "\t", type(img_color), "\tdimensions:", img_color.
 
 # Create directory with exported results
 img_dir = os.path.dirname(img_path)
-out_dir_name = "VPDET," + img_name
+out_dir_name = "VPDET_" + time.strftime("%Y%m%d-%H%M%S") + "_" + img_name
 
 for arg_idx in range(2, len(sys.argv)):
-    out_dir_name += "," + str(sys.argv[arg_idx])
+    out_dir_name += "_" + str(sys.argv[arg_idx])
 
 out_dir_path = os.path.join(img_dir, out_dir_name)
 
@@ -299,14 +300,30 @@ del viz_isec  # release memory
 
 #######################################
 # mean-shift intersection points to converge towards vanishing point candidates
-# print("mean-shift...")
 # Jxy = mean_shift(Ixy, MS_RADIUS2, MS_MAXITER, MS_EPSILON2)
-# print("\ndone")
+# using mean-shift here turned out to be too demanding computationally
 
 #######################################
-# create cumulative image of intersection locations
+# create cumulative map of intersection locations with their weights
+print(img_edges.shape)
+img_intersec = np.zeros(img_edges.shape, dtype=np.float) #
 
+# img_intersec[0][0] = 255
+# img_intersec[0,0] = 255
 
+for lineIdx in range(0, len(Ixy)):
+    xIdx = int(round(Ixy[lineIdx][0]))
+    yIdx = int(round(Ixy[lineIdx][1]))
+    sys.stdout.write("intersection %d / %d : x=%f[%d], y=%f[%d], w=%f\r" % ((lineIdx+1), len(Ixy), Ixy[lineIdx][0], xIdx, Ixy[lineIdx][1], yIdx, Iw[lineIdx]))
+    sys.stdout.flush()
+    img_intersec[xIdx, yIdx] += Iw[lineIdx]
+
+# img_intersec[0:50, 0:50] = 50.5
+# img_intersec[50:100, 0:50] = 100.1
+# img_intersec[0:50, 50:100] = 300.8
+
+# min-max normalize between 0 and 255 before exporting
+cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_intersec)
 
 
 #######################################
