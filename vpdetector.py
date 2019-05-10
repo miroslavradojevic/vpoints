@@ -9,6 +9,7 @@ from geometry import cross
 from geometry import modulus
 from scipy import ndimage
 import matplotlib.pyplot as plt
+
 # import matplotlib.pyplot as plt
 # import matplotlib.image as mpimg
 # import matplotlib
@@ -89,7 +90,7 @@ def get_intersections(lines):
 
 
 # mean-shift (non-blurring) uses neighbourhood defined with radius
-def mean_shift(in_xy, radius2, maxiter, epsilon2):
+def mean_shift(in_xy, radius2, maxiter, epsilon2, in_w=None):
     out_xy = in_xy.copy()
 
     conv = np.array([0.0, 0.0], dtype=float)
@@ -110,11 +111,12 @@ def mean_shift(in_xy, radius2, maxiter, epsilon2):
             for j in range(len(in_xy)):
                 x2 = math.pow(in_xy[j][0] - conv[0], 2)
                 if x2 <= radius2:
-                    y2 = math.pow(in_xy[j][1]-conv[1], 2)
+                    y2 = math.pow(in_xy[j][1] - conv[1], 2)
                     if x2 + y2 <= radius2:
-                        next[0] += in_xy[j][0]
-                        next[1] += in_xy[j][1]
-                        cnt += 1
+                        wgt = 1 if (in_w is None) else in_w[j]
+                        next[0] += wgt * in_xy[j][0]
+                        next[1] += wgt * in_xy[j][1]
+                        cnt += wgt
 
             next[0] /= cnt
             next[1] /= cnt
@@ -128,13 +130,17 @@ def mean_shift(in_xy, radius2, maxiter, epsilon2):
 
             if iter >= maxiter or d2 <= epsilon2:
                 break
-        print("iter=", iter, "d2=", d2)
+
+        print(i, ". finished, iter=", iter, "d2=", d2)
 
         out_xy[i][0] = conv[0]
         out_xy[i][1] = conv[1]
 
     return out_xy
 
+
+# def clustering(Pxy, dist):
+    # //
 
 ############################################################
 try:
@@ -149,9 +155,6 @@ except:
          "Example:\n"
          "python vpdetector.py 5D4L1L1D_L.jpg 100 200 100\n"
          "python vpdetector.py C:\\Users\\miros\\stack\\vpoints\\images\\5D4L1L1D_L.jpg 100 300 100\n")
-
-
-
 
 if not os.path.isfile(img_path) or not Path(img_path).suffix == '.jpg':
     quit("Error:", img_path, "must be a .jpg file")
@@ -294,7 +297,6 @@ for i in range(len(Ixy)):
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_intersections.jpg"), viz_isec)
 del viz_isec  # release memory
 
-
 #######################################
 # mean-shift intersection points to converge towards vanishing point candidates
 # Jxy = mean_shift(Ixy, MS_RADIUS2, MS_MAXITER, MS_EPSILON2)
@@ -303,7 +305,7 @@ del viz_isec  # release memory
 #######################################
 # create cumulative map of intersection locations with their weights
 print(img_edges.shape)
-img_intersec = np.zeros(img_edges.shape, dtype=np.float) #
+img_intersec = np.zeros(img_edges.shape, dtype=np.float)  #
 
 # img_intersec[0][0] = 255
 # img_intersec[0,0] = 255
@@ -312,20 +314,16 @@ for lineIdx in range(0, len(Ixy)):
     xIdx = int(math.floor(Ixy[lineIdx][0]))
     yIdx = int(math.floor(Ixy[lineIdx][1]))
     img_intersec[xIdx, yIdx] += Iw[lineIdx]
-    sys.stdout.write("intersection %d / %d:\tx=%f[%d], y=%f[%d], w=%f\r" % ((lineIdx+1), len(Ixy), Ixy[lineIdx][0], xIdx, Ixy[lineIdx][1], yIdx, Iw[lineIdx]))
+    sys.stdout.write("intersection %d / %d:\tx=%f[%d], y=%f[%d], w=%f\r" % (
+    (lineIdx + 1), len(Ixy), Ixy[lineIdx][0], xIdx, Ixy[lineIdx][1], yIdx, Iw[lineIdx]))
     sys.stdout.flush()
 
-
-print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end = "\n")
-
-# img_intersec[0:50, 0:50] = 50.5
-# img_intersec[50:100, 0:50] = 100.1
-# img_intersec[0:50, 50:100] = 300.8
+print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end="\n")
 
 # min-max normalize between 0 and 255 before exporting
 img_intersec = 255 * ((img_intersec - np.amin(img_intersec)) / (np.amax(img_intersec) - np.amin(img_intersec)));
 
-print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end = "\n")
+print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end="\n")
 
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_intersec)
 
@@ -333,13 +331,9 @@ cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_inte
 # local peaks using mean-shift
 
 
-
 #######################################
 # cluster converged points
 
 
-
 #######################################
 # pick vanishing points
-
-
