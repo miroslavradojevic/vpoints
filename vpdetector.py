@@ -162,6 +162,11 @@ if not os.path.isfile(img_path) or not Path(img_path).suffix == '.jpg':
 # Read color image
 img_color = cv2.imread(img_path, cv2.IMREAD_COLOR)
 
+print(type(img_color))
+
+# if True:
+#     quit("")
+
 img_name = os.path.splitext(os.path.basename(img_path))[0]
 print("Read image", img_name, "\t", type(img_color), "\tdimensions:", img_color.shape)
 
@@ -287,12 +292,12 @@ print(len(Ixy), "intersections found")
 
 #######################################
 # visualize intersection points
-viz_isec = img_color
+viz_isec = img_color.copy()
 
 for i in range(len(Ixy)):
     x = int(Ixy[i][0])
     y = int(Ixy[i][1])
-    cv2.circle(viz_isec, (x, y), int(10), (0, 0, 255), 5)
+    cv2.circle(viz_isec, (x, y), int(5), (0, 0, 255), 2)
 
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_intersections.jpg"), viz_isec)
 del viz_isec  # release memory
@@ -305,12 +310,22 @@ del viz_isec  # release memory
 #######################################
 # create cumulative map of intersection locations with their weights
 print(img_edges.shape)
-img_intersec = np.zeros(img_edges.shape, dtype=np.float)  #
+img_intersec = np.zeros(img_edges.shape, dtype=np.float)
+# cv2.circle(img_intersec, (60, 50), int(10), (0, 255, 0), 5)
+# print(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"))
+# cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_intersec)
 
-# img_intersec[0][0] = 255
-# img_intersec[0,0] = 255
+# test only
+# img = np.zeros((512, 512, 3), dtype=np.float)
+# cv2.line(img, (0, 0), (511, 511), (255, 0, 0), 5)
+# cv2.circle(img, (256, 256), int(20), (0, 255, 0), 1)
+# cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec1.jpg"), img)
 
-for lineIdx in range(0, len(Ixy)):
+
+if True:
+    quit("-----------------------------")
+
+for lineIdx in range(len(Ixy)):
     xIdx = int(math.floor(Ixy[lineIdx][0]))
     yIdx = int(math.floor(Ixy[lineIdx][1]))
     img_intersec[xIdx, yIdx] += Iw[lineIdx]
@@ -318,12 +333,22 @@ for lineIdx in range(0, len(Ixy)):
     (lineIdx + 1), len(Ixy), Ixy[lineIdx][0], xIdx, Ixy[lineIdx][1], yIdx, Iw[lineIdx]))
     sys.stdout.flush()
 
+
 print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end="\n")
+
+tt = np.sum(img_intersec > 0)
+print(tt, " those > 0")
 
 # min-max normalize between 0 and 255 before exporting
 img_intersec = 255 * ((img_intersec - np.amin(img_intersec)) / (np.amax(img_intersec) - np.amin(img_intersec)));
 
 print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end="\n")
+
+# add intersection circles on the image
+# for lineIdx in range(len(Ixy)):
+#     xIdx = int(math.floor(Ixy[lineIdx][0]))
+#     yIdx = int(math.floor(Ixy[lineIdx][1]))
+cv2.circle(img_intersec, (60, 50), int(5), (0, 255, 0), 2)
 
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_intersec)
 
