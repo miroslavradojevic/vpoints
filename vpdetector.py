@@ -20,6 +20,7 @@ MIN_SIZE_CONN_COMPONENT = 100
 MAX_LINE_GAP = 5
 GAUSS_BLUR = 9
 SMALL_POSITIVE_INTENSITY = 0.0001
+D_XY = 5
 MS_RADIUS2 = 5 * 5
 MS_MAXITER = 10
 MS_EPSILON2 = 0.0001
@@ -89,6 +90,55 @@ def get_intersections(lines):
     return intersection_coord, intersection_weight
 
 
+def mean_shift_image(input_image, Dxy, maxiter, epsilon2):
+    input_image_height = input_image.shape[0]
+    input_image_width = input_image.shape[1]
+    print("H=", input_image_height, "W=", input_image_width)
+
+    conv = np.array([0.0, 0.0], dtype=float)
+    next = np.array([0.0, 0.0], dtype=float)
+
+    p_xy = []
+    for x in range(input_image_height):
+        for y in range(input_image_width):
+            if (input_image[x, y] > 0):
+                conv[0] = x
+                conv[1] = y
+                iter = 0
+                while True:
+                    cnt = 0
+                    next[0] = 0  # // local mean is the follow-up location
+                    next[1] = 0
+
+                    for x1 in range(x - D_XY, x + D_XY + 1):
+                        for y1 in range(y - D_XY, y + D_XY + 1):
+                            if (x1 >= 0 and x1 < input_image_height and y1 >= 0 and y1 < input_image_width):
+                                wgt = input_image[x1, y1]  # 1 if (in_w is None) else in_w[j]
+                                next[0] += wgt * x1
+                                next[1] += wgt * y1
+                                cnt += wgt
+
+                    next[0] /= cnt
+                    next[1] /= cnt
+
+                    d2 = math.pow(next[0] - conv[0], 2) + math.pow(next[1] - conv[1], 2)
+
+                    conv[0] = next[0]
+                    conv[1] = next[1]
+
+                    iter += 1
+
+                    if iter >= maxiter or d2 <= epsilon2:
+                        break
+
+                p_xy.append(conv)
+
+            sys.stdout.write("%f%%   \r" % ( 100.0 * ((x+1) * (y+1)) / (input_image_height * input_image_width)  ))
+            sys.stdout.flush()
+
+    return p_xy
+
+
 # mean-shift (non-blurring) uses neighbourhood defined with radius
 def mean_shift(in_xy, radius2, maxiter, epsilon2, in_w=None):
     out_xy = in_xy.copy()
@@ -140,7 +190,7 @@ def mean_shift(in_xy, radius2, maxiter, epsilon2, in_w=None):
 
 
 # def clustering(Pxy, dist):
-    # //
+# //
 
 ############################################################
 try:
@@ -310,8 +360,10 @@ del viz_isec  # release memory
 
 #######################################
 # create cumulative map of intersection locations with their weights
-print(img_edges.shape)
+# print(img_edges.shape)
+
 img_intersec = np.zeros(img_edges.shape, dtype=np.float)
+
 # cv2.circle(img_intersec, (60, 50), int(10), (0, 255, 0), 5)
 # print(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"))
 # cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_intersec)
@@ -323,39 +375,46 @@ img_intersec = np.zeros(img_edges.shape, dtype=np.float)
 # cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec1.jpg"), img)
 
 
-if True:
-    quit("-----------------------------")
-
 for lineIdx in range(len(Ixy)):
     xIdx = int(math.floor(Ixy[lineIdx][0]))
     yIdx = int(math.floor(Ixy[lineIdx][1]))
-    img_intersec[xIdx, yIdx] += Iw[lineIdx]
+    img_intersec[yIdx, xIdx] += Iw[lineIdx]
     sys.stdout.write("intersection %d / %d:\tx=%f[%d], y=%f[%d], w=%f\r" % (
-    (lineIdx + 1), len(Ixy), Ixy[lineIdx][0], xIdx, Ixy[lineIdx][1], yIdx, Iw[lineIdx]))
+        (lineIdx + 1), len(Ixy), Ixy[lineIdx][0], xIdx, Ixy[lineIdx][1], yIdx, Iw[lineIdx]))
     sys.stdout.flush()
-
 
 print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end="\n")
 
 tt = np.sum(img_intersec > 0)
-print(tt, " those > 0")
+print(tt, " | ", len(Ixy), " ", (tt / len(Ixy)))
 
 # min-max normalize between 0 and 255 before exporting
 img_intersec = 255 * ((img_intersec - np.amin(img_intersec)) / (np.amax(img_intersec) - np.amin(img_intersec)));
 
 print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end="\n")
 
-# add intersection circles on the image
-# for lineIdx in range(len(Ixy)):
-#     xIdx = int(math.floor(Ixy[lineIdx][0]))
-#     yIdx = int(math.floor(Ixy[lineIdx][1]))
-cv2.circle(img_intersec, (60, 50), int(5), (0, 255, 0), 2)
-
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_intersec)
+
+########################################################################################################
+# plot intersection circles over the intersection image
+img_intersec_dimensions = list(img_intersec.shape)
+img_intersec_dimensions.append(3)  # color image needed for color plots
+
+img_intersec_viz = np.zeros(tuple(img_intersec_dimensions), dtype=np.uint8)
+img_intersec_viz[:, :, 0] = img_intersec.astype(np.uint8)
+img_intersec_viz[:, :, 1] = img_intersec.astype(np.uint8)
+img_intersec_viz[:, :, 2] = img_intersec.astype(np.uint8)
+for lineIdx in range(len(Ixy)):
+    xIdx = int(math.floor(Ixy[lineIdx][0]))
+    yIdx = int(math.floor(Ixy[lineIdx][1]))
+    cv2.circle(img_intersec_viz, (xIdx, yIdx), int(8), (0, 255, 0), 1)
+cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec_viz.jpg"), img_intersec_viz)
+del img_intersec_viz
 
 #######################################
 # local peaks using mean-shift
-
+p_xy = mean_shift_image(img_intersec, D_XY, MS_MAXITER, MS_EPSILON2)
+print(len(p_xy))
 
 #######################################
 # cluster converged points
