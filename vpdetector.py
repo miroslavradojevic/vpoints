@@ -220,6 +220,7 @@ cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_canny_after.jpg"), img
 
 img_edges = ((img_edges > 124).astype(int) * 255).astype(np.uint8)  # binary image: 0 and 255 values only
 
+# https://stackoverflow.com/questions/42798659/how-to-remove-small-connected-objects-using-opencv
 nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(img_edges, connectivity=8)
 sizes = stats[1:, -1]
 nb_components = nb_components - 1
