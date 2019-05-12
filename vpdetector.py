@@ -3,30 +3,23 @@ import sys
 import cv2
 import math
 import time
+import datetime
 import numpy as np
 from pathlib import Path
 from geometry import cross
 from geometry import modulus
-from scipy import ndimage
-import matplotlib.pyplot as plt
 
-# import matplotlib.pyplot as plt
-# import matplotlib.image as mpimg
-# import matplotlib
-# import matplotlib.pyplot
 
 MIN_LINE_LENGTH = 100
 MIN_SIZE_CONN_COMPONENT = 100
 MAX_LINE_GAP = 5
-GAUSS_BLUR = 9
+GAUSS_BLUR = 9  # pixels
 SMALL_POSITIVE_INTENSITY = 1e-6
-D_XY = 50
-MS_RADIUS2 = 10 * 10
-MS_MAXITER = 1e4
-MS_EPSILON2 = 1e-6
+MS_D_XY = 3
+MS_MAXITER = 5
+MS_EPSILON2 = 1e-2
+CLUSTER_DIST = 5
 
-
-############################################################
 
 def get_angles(lines, nr_angles):
     for i in range(len(lines)):
@@ -90,25 +83,20 @@ def get_intersections(lines):
     return intersection_coord, intersection_weight
 
 
-def mean_shift_image(input_image, Dxy, maxiter, epsilon2):
-
+def mean_shift(input_image, d_xy, maxiter, epsilon2):
     input_image_height = input_image.shape[0]
     input_image_width = input_image.shape[1]
 
-    # conv = np.array([0.0, 0.0], dtype=float)
-    # next = np.array([0.0, 0.0], dtype=float)
-
-    # my_counter = 0
+    input_image_list = input_image.tolist()  # works faster if used as list
 
     ms_xy = []
     for x in range(input_image_height):
         for y in range(input_image_width):
-            if input_image[x, y] > 0:
 
-                # my_counter += 1
-                #
-                # if my_counter >= 10:
-                #     continue
+            # sys.stdout.write("%d%%   \r" % (100 * x / (input_image_height - 1)))
+            # sys.stdout.flush()
+
+            if input_image_list[x][y] > 0:
 
                 conv_x = x
                 conv_y = y
@@ -116,16 +104,17 @@ def mean_shift_image(input_image, Dxy, maxiter, epsilon2):
 
                 while True:
                     cnt = 0
-                    next_x = 0  # // local mean is the follow-up location
+                    next_x = 0  # local mean represents the follow-up location
                     next_y = 0
 
-                    for x1 in range(x - Dxy, x + Dxy + 1):
-                        for y1 in range(y - Dxy, y + Dxy + 1):
+                    for x1 in range(x - d_xy, x + d_xy + 1):
+                        for y1 in range(y - d_xy, y + d_xy + 1):
                             if 0 <= x1 < input_image_height and 0 <= y1 < input_image_width:
-                                if input_image[x1, y1] > 0:
-                                    next_x += input_image[x1, y1] * x1
-                                    next_y += input_image[x1, y1] * y1
-                                    cnt += input_image[x1, y1]
+                                val = input_image_list[x1][y1]
+                                if val > 0:
+                                    next_x += val * x1
+                                    next_y += val * y1
+                                    cnt += val
 
                     next_x /= cnt
                     next_y /= cnt
@@ -137,66 +126,65 @@ def mean_shift_image(input_image, Dxy, maxiter, epsilon2):
 
                     iteration += 1
 
-                    if iteration >= maxiter or d2 <= epsilon2: #
+                    if iteration >= maxiter or d2 <= epsilon2:
                         break
 
                 ms_xy.append([conv_x, conv_y])
 
+    del input_image_list
     return ms_xy
 
 
-# mean-shift (non-blurring) uses neighbourhood defined with radius
-def mean_shift(in_xy, radius2, maxiter, epsilon2, in_w=None):
-    out_xy = in_xy.copy()
+def clustering(p_xy, cluster_dist):
+    cluster_dist2 = math.pow(cluster_dist, 2)
 
-    conv = np.array([0.0, 0.0], dtype=float)
-    next = np.array([0.0, 0.0], dtype=float)
+    ####
+    nbridx = []
+    for i in range(len(p_xy)):
+        nbridx.append([])
 
-    for i in range(len(out_xy)):
-        sys.stdout.write("%f%%   \r" % (100 * (i + 1) / len(out_xy)))
-        sys.stdout.flush()
-        # refine in_xy[i] location and store the result in out_xy[i]
-        conv[0] = in_xy[i][0]
-        conv[1] = in_xy[i][1]
-        iter = 0
-        while True:
-            cnt = 0
-            next[0] = 0  # // local mean is the follow-up location
-            next[1] = 0
+    bnd = len(p_xy)
+    ####
+    start_time = time.time()
+    for i in range(bnd):
+        for j in range(i + 1, bnd):
+            cd = math.pow(p_xy[i][0] - p_xy[j][0], 2) + math.pow(p_xy[i][1] - p_xy[j][1], 2)
 
-            for j in range(len(in_xy)):
-                x2 = math.pow(in_xy[j][0] - conv[0], 2)
-                if x2 <= radius2:
-                    y2 = math.pow(in_xy[j][1] - conv[1], 2)
-                    if x2 + y2 <= radius2:
-                        wgt = 1 if (in_w is None) else in_w[j]
-                        next[0] += wgt * in_xy[j][0]
-                        next[1] += wgt * in_xy[j][1]
-                        cnt += wgt
+            if cd <= cluster_dist2:
+                nbridx[i].append(j)
+                nbridx[j].append(i)
 
-            next[0] /= cnt
-            next[1] /= cnt
+    print("stage 2: %ssec" % (time.time() - start_time))
+    sys.stdout.flush()
 
-            d2 = math.pow(next[0] - conv[0], 2) + math.pow(next[1] - conv[1], 2)
+    ####
+    labels = np.zeros(bnd, dtype=np.int32)
+    for i in range(len(labels)):
+        labels[i] = i
 
-            conv[0] = next[0]
-            conv[1] = next[1]
+    # t0 = datetime.datetime.now()
+    # t1 = datetime.datetime.now()
+    # dt = t1 - t0
+    # print("stage 3: ", (dt.microseconds / 1000), "ms")
 
-            iter += 1
+    ####
 
-            if iter >= maxiter or d2 <= epsilon2:
-                break
+    for i in range(len(p_xy)):
+        for nbri in range(len(nbridx[i])):
+            j = nbridx[i][nbri]
+            if labels[j] != labels[i]:
+                curr_label = labels[j]
+                newLabel = labels[i]
 
-        print(i, ". finished, iter=", iter, "d2=", d2)
+                labels[j] = newLabel
 
-        out_xy[i][0] = conv[0]
-        out_xy[i][1] = conv[1]
+                # set all that were curr_label to newLabel
+                for k in range(len(labels)):
+                    if labels[k] == curr_label:
+                        labels[k] = newLabel
 
-    return out_xy
+    return labels
 
-
-# def clustering(Pxy, dist):
-# //
 
 ############################################################
 try:
@@ -217,8 +205,6 @@ if not os.path.isfile(img_path) or not Path(img_path).suffix == '.jpg':
 
 # Read color image
 img_color = cv2.imread(img_path, cv2.IMREAD_COLOR)
-
-print(type(img_color))
 
 img_name = os.path.splitext(os.path.basename(img_path))[0]
 print("Read image", img_name, "\t", type(img_color), "\tdimensions:", img_color.shape)
@@ -357,14 +343,7 @@ cv2.imwrite(os.path.join(out_dir_path, img_name + "_intersections.jpg"), viz_ise
 del viz_isec  # release memory
 
 #######################################
-# mean-shift intersection points to converge towards vanishing point candidates
-# Jxy = mean_shift(Ixy, MS_RADIUS2, MS_MAXITER, MS_EPSILON2)
-# using mean-shift here turned out to be too demanding computationally
-
-#######################################
 # create cumulative map of intersection locations with their weights
-# print(img_edges.shape)
-
 img_intersec = np.zeros(img_edges.shape, dtype=np.float32)
 
 for lineIdx in range(len(Ixy)):
@@ -375,22 +354,20 @@ for lineIdx in range(len(Ixy)):
         (lineIdx + 1), len(Ixy), Ixy[lineIdx][0], xIdx, Ixy[lineIdx][1], yIdx, Iw[lineIdx]))
     sys.stdout.flush()
 
-img_intersec_min = np.amin(img_intersec)
+print("\naccumulated ", np.sum(img_intersec > 0), " | ", len(Ixy), " ", (100.0 * np.sum(img_intersec > 0) / len(Ixy)), "%")
 
-print("\nmin = %f max = %f" % (img_intersec_min, np.amax(img_intersec)), end=" ---> ")
-tt = img_intersec - img_intersec_min
-if True:
-    quit("?")
+img_intersec_min = np.amin(img_intersec)
+img_intersec_max = np.amax(img_intersec)
 
 # min-max normalize between 0 and 255 before exporting
-img_intersec = 255 * ((img_intersec - np.amin(img_intersec)) / (np.amax(img_intersec) - np.amin(img_intersec)));
-
-print(" min = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end="\n")
-
+img_intersec = 255 * ((img_intersec - img_intersec_min) / (img_intersec_max - img_intersec_min))
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_intersec)
 
+print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)))
+
 ########################################################################################################
-# plot intersections
+print("plot intersections...", end=" ")
+sys.stdout.flush()
 img_intersec_dimensions = list(img_intersec.shape)
 img_intersec_dimensions.append(3)  # color image needed for color plots
 
@@ -402,16 +379,24 @@ for lineIdx in range(len(Ixy)):
     xIdx = int(math.floor(Ixy[lineIdx][0]))
     yIdx = int(math.floor(Ixy[lineIdx][1]))
     cv2.circle(img_intersec_viz, (xIdx, yIdx), int(8), (0, 255, 0), 1)
-cv2.imwrite(os.path.join(out_dir_path, img_name + "_intersec.jpg"), img_intersec_viz)
+cv2.imwrite(os.path.join(out_dir_path, img_name + "_Ixy.jpg"), img_intersec_viz)
 del img_intersec_viz
-
-#######################################
-# local peaks using mean-shift
-print("mean shift... ", end="")
-p_xy = mean_shift_image(img_intersec, D_XY, MS_MAXITER, MS_EPSILON2)
-print("done")
+print("done.")
+sys.stdout.flush()
 
 ########################################################################################################
+print("mean shift...", end=" ")
+sys.stdout.flush()
+
+start_time = time.time()
+
+p_xy = mean_shift(img_intersec, MS_D_XY, MS_MAXITER, MS_EPSILON2)
+
+print("done. %d elements, %ssec" % (len(p_xy), time.time() - start_time))
+sys.stdout.flush()
+
+########################################################################################################
+
 # plot converged intersections
 img_intersec_viz = np.zeros(tuple(img_intersec_dimensions), dtype=np.uint8)
 img_intersec_viz[:, :, 0] = img_intersec.astype(np.uint8)
@@ -421,12 +406,16 @@ img_intersec_viz[:, :, 2] = img_intersec.astype(np.uint8)
 for i in range(len(p_xy)):
     cv2.circle(img_intersec_viz, (int(p_xy[i][1]), int(p_xy[i][0])), int(8), (0, 255, 255), 1)
 
-cv2.imwrite(os.path.join(out_dir_path, img_name + "_intersec_ms.jpg"), img_intersec_viz)
+cv2.imwrite(os.path.join(out_dir_path, img_name + "_Pxy.jpg"), img_intersec_viz)
 del img_intersec_viz
 
 #######################################
-# cluster converged points
-
+print("clustering...", end=" ")
+sys.stdout.flush()
+lab = clustering(p_xy, CLUSTER_DIST)
+print("done.")
+sys.stdout.flush()
 
 #######################################
-# pick vanishing points
+print("estimation...", end=" ")
+print("done.")

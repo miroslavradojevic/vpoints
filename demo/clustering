@@ -1,18 +1,3 @@
-package com.braincadet.clust;
-
-import ij.IJ;
-import ij.ImagePlus;
-import ij.gui.OvalRoi;
-import ij.gui.Overlay;
-import ij.io.FileSaver;
-import ij.plugin.PlugIn;
-import ij.process.ByteProcessor;
-
-import java.awt.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Random;
-
 public class Dist_Conn_ClusteringDemo implements PlugIn {
     public void run(String s) {
 
@@ -45,7 +30,6 @@ public class Dist_Conn_ClusteringDemo implements PlugIn {
 
         int[] lab = clustering1(Cxyr);
         ArrayList<float[]> C1 = extract_centroids(lab, Cxy);
-//        IJ.log(Arrays.toString(lab));
         for (int i = 0; i < C1.size(); i++) {
             IJ.log("C "+i+" : " + IJ.d2s(C1.get(i)[0],2) + ",\t" + IJ.d2s(C1.get(i)[1],2) + ",\t" + IJ.d2s(C1.get(i)[2],0) +" elements");
         }
@@ -92,36 +76,9 @@ public class Dist_Conn_ClusteringDemo implements PlugIn {
         }
 
         int[] lab2 = clustering2(Pxy, D); // lab2 will contain a cluster label for every value submitted
-        IJ.log(Arrays.toString(lab2));
-
-        Overlay ov2 = new Overlay();
-        Color[] c2 = new Color[Pxy.size()];
-        for (int i = 0; i < c2.length; i++) c2[i] = getRandomColor();
-
-        for (int i = 0; i < Pxy.size(); i++) {
-            OvalRoi ovRoi = new OvalRoi(Pxy.get(i)[0]-(D/2f)+.5, Pxy.get(i)[1]-(D/2f)+.5, 2*(D/2f), 2*(D/2f));
-            int r = c2[lab2[i]].getRed();
-            int g = c2[lab2[i]].getGreen();
-            int b = c2[lab2[i]].getBlue();
-            ovRoi.setFillColor(new Color(r,g,b,100)); // alpha = 100/255
-            ov2.add(ovRoi);
-        }
-
-        ImagePlus im2 = new ImagePlus("DEMO 2: "+NN+" points, "+K+" clusters. Grouped if D<="+D, new ByteProcessor(W, H));
-        im2.setOverlay(ov2);
-        im2.show();
-
-
-        for (int i = 0; i < 4; i++) im2.getCanvas().zoomIn(0, 0);
-
-        FileSaver fs2 = new FileSaver(im2); // save it
-        fs2.saveAsTiff("clustering_test2.tif");
-
-        IJ.log("# estimate centroids");
 
         ArrayList<float[]> C2 = extract_centroids(lab2, Pxy);
         ArrayList<Integer> lab3 = extract_labels(lab2);
-
 
         Overlay ov3 = new Overlay();
         for (int i = 0; i < Pxy.size(); i++) {
@@ -147,22 +104,6 @@ public class Dist_Conn_ClusteringDemo implements PlugIn {
 
         for (int i = 0; i < 4; i++) im3.getCanvas().zoomIn(0, 0);
 
-    }
-
-    private static Color getRandomColor(){
-        switch (new Random().nextInt(10)) {
-            case 0: return Color.RED;
-            case 1: return Color.GREEN;
-            case 2: return Color.WHITE;
-            case 3: return Color.ORANGE;
-            case 4: return Color.PINK;
-            case 5: return Color.YELLOW;
-            case 6: return Color.GRAY;
-            case 7: return Color.MAGENTA;
-            case 8: return Color.CYAN;
-            case 9: return Color.BLUE;
-            default:return Color.BLACK;
-        }
     }
 
     public static int[] clustering1(ArrayList<float[]> Cxyzr) {
@@ -207,7 +148,7 @@ public class Dist_Conn_ClusteringDemo implements PlugIn {
 
     public static int[] clustering2(ArrayList<float[]> Pxy, float R) {
 
-        ArrayList<Integer>[] nbridx = new ArrayList[Pxy.size()];//ArrayList<Integer>[Pxy.size()];
+        ArrayList<Integer>[] nbridx = new ArrayList[Pxy.size()];
         for (int i = 0; i < nbridx.length; i++) {
             nbridx[i] = new ArrayList<Integer>();
         }
