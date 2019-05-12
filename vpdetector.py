@@ -19,11 +19,11 @@ MIN_LINE_LENGTH = 100
 MIN_SIZE_CONN_COMPONENT = 100
 MAX_LINE_GAP = 5
 GAUSS_BLUR = 9
-SMALL_POSITIVE_INTENSITY = 0.0001
-D_XY = 5
-MS_RADIUS2 = 5 * 5
-MS_MAXITER = 10
-MS_EPSILON2 = 0.0001
+SMALL_POSITIVE_INTENSITY = 1e-6
+D_XY = 50
+MS_RADIUS2 = 10 * 10
+MS_MAXITER = 1e4
+MS_EPSILON2 = 1e-6
 
 
 ############################################################
@@ -91,52 +91,58 @@ def get_intersections(lines):
 
 
 def mean_shift_image(input_image, Dxy, maxiter, epsilon2):
+
     input_image_height = input_image.shape[0]
     input_image_width = input_image.shape[1]
-    print("H=", input_image_height, "W=", input_image_width)
 
-    conv = np.array([0.0, 0.0], dtype=float)
-    next = np.array([0.0, 0.0], dtype=float)
+    # conv = np.array([0.0, 0.0], dtype=float)
+    # next = np.array([0.0, 0.0], dtype=float)
 
-    p_xy = []
+    # my_counter = 0
+
+    ms_xy = []
     for x in range(input_image_height):
         for y in range(input_image_width):
-            if (input_image[x, y] > 0):
-                conv[0] = x
-                conv[1] = y
-                iter = 0
+            if input_image[x, y] > 0:
+
+                # my_counter += 1
+                #
+                # if my_counter >= 10:
+                #     continue
+
+                conv_x = x
+                conv_y = y
+                iteration = 0
+
                 while True:
                     cnt = 0
-                    next[0] = 0  # // local mean is the follow-up location
-                    next[1] = 0
+                    next_x = 0  # // local mean is the follow-up location
+                    next_y = 0
 
-                    for x1 in range(x - D_XY, x + D_XY + 1):
-                        for y1 in range(y - D_XY, y + D_XY + 1):
-                            if (x1 >= 0 and x1 < input_image_height and y1 >= 0 and y1 < input_image_width):
-                                wgt = input_image[x1, y1]  # 1 if (in_w is None) else in_w[j]
-                                next[0] += wgt * x1
-                                next[1] += wgt * y1
-                                cnt += wgt
+                    for x1 in range(x - Dxy, x + Dxy + 1):
+                        for y1 in range(y - Dxy, y + Dxy + 1):
+                            if 0 <= x1 < input_image_height and 0 <= y1 < input_image_width:
+                                if input_image[x1, y1] > 0:
+                                    next_x += input_image[x1, y1] * x1
+                                    next_y += input_image[x1, y1] * y1
+                                    cnt += input_image[x1, y1]
 
-                    next[0] /= cnt
-                    next[1] /= cnt
+                    next_x /= cnt
+                    next_y /= cnt
 
-                    d2 = math.pow(next[0] - conv[0], 2) + math.pow(next[1] - conv[1], 2)
+                    d2 = math.pow(next_x - conv_x, 2) + math.pow(next_y - conv_y, 2)
 
-                    conv[0] = next[0]
-                    conv[1] = next[1]
+                    conv_x = next_x
+                    conv_y = next_y
 
-                    iter += 1
+                    iteration += 1
 
-                    if iter >= maxiter or d2 <= epsilon2:
+                    if iteration >= maxiter or d2 <= epsilon2: #
                         break
 
-                p_xy.append(conv)
+                ms_xy.append([conv_x, conv_y])
 
-            sys.stdout.write("%f%%   \r" % ( 100.0 * ((x+1) * (y+1)) / (input_image_height * input_image_width)  ))
-            sys.stdout.flush()
-
-    return p_xy
+    return ms_xy
 
 
 # mean-shift (non-blurring) uses neighbourhood defined with radius
@@ -213,9 +219,6 @@ if not os.path.isfile(img_path) or not Path(img_path).suffix == '.jpg':
 img_color = cv2.imread(img_path, cv2.IMREAD_COLOR)
 
 print(type(img_color))
-
-# if True:
-#     quit("")
 
 img_name = os.path.splitext(os.path.basename(img_path))[0]
 print("Read image", img_name, "\t", type(img_color), "\tdimensions:", img_color.shape)
@@ -362,18 +365,7 @@ del viz_isec  # release memory
 # create cumulative map of intersection locations with their weights
 # print(img_edges.shape)
 
-img_intersec = np.zeros(img_edges.shape, dtype=np.float)
-
-# cv2.circle(img_intersec, (60, 50), int(10), (0, 255, 0), 5)
-# print(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"))
-# cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_intersec)
-
-# test only
-# img = np.zeros((512, 512, 3), dtype=np.float)
-# cv2.line(img, (0, 0), (511, 511), (255, 0, 0), 5)
-# cv2.circle(img, (256, 256), int(20), (0, 255, 0), 1)
-# cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec1.jpg"), img)
-
+img_intersec = np.zeros(img_edges.shape, dtype=np.float32)
 
 for lineIdx in range(len(Ixy)):
     xIdx = int(math.floor(Ixy[lineIdx][0]))
@@ -383,20 +375,22 @@ for lineIdx in range(len(Ixy)):
         (lineIdx + 1), len(Ixy), Ixy[lineIdx][0], xIdx, Ixy[lineIdx][1], yIdx, Iw[lineIdx]))
     sys.stdout.flush()
 
-print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end="\n")
+img_intersec_min = np.amin(img_intersec)
 
-tt = np.sum(img_intersec > 0)
-print(tt, " | ", len(Ixy), " ", (tt / len(Ixy)))
+print("\nmin = %f max = %f" % (img_intersec_min, np.amax(img_intersec)), end=" ---> ")
+tt = img_intersec - img_intersec_min
+if True:
+    quit("?")
 
 # min-max normalize between 0 and 255 before exporting
 img_intersec = 255 * ((img_intersec - np.amin(img_intersec)) / (np.amax(img_intersec) - np.amin(img_intersec)));
 
-print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end="\n")
+print(" min = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), end="\n")
 
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_intersec)
 
 ########################################################################################################
-# plot intersection circles over the intersection image
+# plot intersections
 img_intersec_dimensions = list(img_intersec.shape)
 img_intersec_dimensions.append(3)  # color image needed for color plots
 
@@ -408,13 +402,27 @@ for lineIdx in range(len(Ixy)):
     xIdx = int(math.floor(Ixy[lineIdx][0]))
     yIdx = int(math.floor(Ixy[lineIdx][1]))
     cv2.circle(img_intersec_viz, (xIdx, yIdx), int(8), (0, 255, 0), 1)
-cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec_viz.jpg"), img_intersec_viz)
+cv2.imwrite(os.path.join(out_dir_path, img_name + "_intersec.jpg"), img_intersec_viz)
 del img_intersec_viz
 
 #######################################
 # local peaks using mean-shift
+print("mean shift... ", end="")
 p_xy = mean_shift_image(img_intersec, D_XY, MS_MAXITER, MS_EPSILON2)
-print(len(p_xy))
+print("done")
+
+########################################################################################################
+# plot converged intersections
+img_intersec_viz = np.zeros(tuple(img_intersec_dimensions), dtype=np.uint8)
+img_intersec_viz[:, :, 0] = img_intersec.astype(np.uint8)
+img_intersec_viz[:, :, 1] = img_intersec.astype(np.uint8)
+img_intersec_viz[:, :, 2] = img_intersec.astype(np.uint8)
+
+for i in range(len(p_xy)):
+    cv2.circle(img_intersec_viz, (int(p_xy[i][1]), int(p_xy[i][0])), int(8), (0, 255, 255), 1)
+
+cv2.imwrite(os.path.join(out_dir_path, img_name + "_intersec_ms.jpg"), img_intersec_viz)
+del img_intersec_viz
 
 #######################################
 # cluster converged points

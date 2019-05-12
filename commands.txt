@@ -1,1 +1,2 @@
 python vpdetector.py /Users/miroslav/stack/vpoints/images/box.jpg 50 100 50
+python vpdetector.py "C:\Users\miros\stack\vpoints\images\5D4L1L1D_L.jpg" 100 200 100
