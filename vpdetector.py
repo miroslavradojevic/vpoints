@@ -8,12 +8,12 @@ from pathlib import Path
 
 RESIZE_WIDTH = 512
 RESIZE_HEIGHT = 512
-MIN_LINE_LENGTH = 50
-MIN_SIZE_CONN_COMPONENT = 40
+MIN_LINE_LENGTH = 30
+MIN_SIZE_CONN_COMPONENT = 20 # slightly less than MIN_LINE_LENGTH
 MAX_LINE_GAP = 5
-GAUSS_BLUR = 9
-SMALL_POSITIVE_INTENSITY = 1e-6
-MS_D_XY = 20
+GAUSS_BLUR = 7
+SMALL_POSITIVE_VALUE = 1e-6
+MS_D_XY = 30  # rough cover of the location neighborhood for mean-shift refinement
 MS_MAXITER = 1000
 MS_EPSILON2 = 1e-6
 CLUSTER_DIST = 1
@@ -75,7 +75,7 @@ def get_intersections(lines, angle_mean, angle_std):
 
             r_x_s = cross(rx, ry, sx, sy)
 
-            if math.fabs(r_x_s) > SMALL_POSITIVE_INTENSITY:
+            if math.fabs(r_x_s) > SMALL_POSITIVE_VALUE:
 
                 # compute location
                 qpx = qx - px
@@ -114,7 +114,7 @@ def get_intersections(lines, angle_mean, angle_std):
 
                 isec_angle_deg = math.acos(
                     dot(p_isec_x / p_isec_mod, p_isec_y / p_isec_mod, q_isec_x / q_isec_mod, q_isec_y / q_isec_mod)) * (
-                                             180.0 / math.pi)
+                                         180.0 / math.pi)
 
                 # add if it is within the boundaries of the extended image
                 if 0 <= isec_x < w_ext and 0 <= isec_y < h_ext:
@@ -123,7 +123,7 @@ def get_intersections(lines, angle_mean, angle_std):
                     intersection_angle.append(isec_angle_deg)
                     intersection_weight_value = angle_gaussian_sensitivity(isec_angle_deg, angle_mean, angle_std)
                     intersection_weight_value *= (r_mod / max(p_isec_mod, r_isec_mod)) * (
-                                s_mod / max(q_isec_mod, s_isec_mod))
+                            s_mod / max(q_isec_mod, s_isec_mod))
                     intersection_weight.append(intersection_weight_value)
 
     return intersection_coord, intersection_weight, intersection_angle
@@ -136,6 +136,7 @@ def mean_shift(input_image, d_xy, maxiter, epsilon2):
     input_image_list = input_image.tolist()  # retrieving values works way faster if used as list
 
     ms_xy = []
+    w_xy = []  # retain the weights of the converged locations
     for x in range(input_image_height):
         for y in range(input_image_width):
 
@@ -173,21 +174,20 @@ def mean_shift(input_image, d_xy, maxiter, epsilon2):
                         break
 
                 ms_xy.append([conv_x, conv_y])
+                w_xy.append(input_image_list[x][y])
 
     del input_image_list
-    return ms_xy
+    return ms_xy, w_xy
 
 
 def clustering(p_xy, cluster_dist):
     cluster_dist2 = math.pow(cluster_dist, 2)
 
-    ####
     nbridx = []
     for i in range(len(p_xy)):
         nbridx.append([])
 
     nr_points = len(p_xy)
-    ####
 
     for i in range(nr_points):
         for j in range(i + 1, nr_points):
@@ -196,12 +196,10 @@ def clustering(p_xy, cluster_dist):
                 nbridx[i].append(j)
                 nbridx[j].append(i)
 
-    ####
     labels = np.zeros(nr_points, dtype=np.int32)
     for i in range(nr_points):
         labels[i] = i
 
-    ####
     for i in range(nr_points):
         for nbri in range(len(nbridx[i])):
             j = nbridx[i][nbri]
@@ -219,7 +217,7 @@ def clustering(p_xy, cluster_dist):
     return labels
 
 
-def extract(labels, locs_xy, min_count):
+def extract(labels, locs_xy, wgts_xy, min_count):
     nr_locs = len(labels)
 
     checked = [False] * nr_locs
@@ -231,6 +229,7 @@ def extract(labels, locs_xy, min_count):
             centroid_x = locs_xy[i][0]
             centroid_y = locs_xy[i][1]
             count = 1
+            centroid_weight = wgts_xy[i]
             checked[i] = True
             for j in range(i + 1, nr_locs):
                 if not checked[j]:
@@ -238,22 +237,24 @@ def extract(labels, locs_xy, min_count):
                         centroid_x += locs_xy[j][0]
                         centroid_y += locs_xy[j][1]
                         count += 1
+                        centroid_weight += wgts_xy[j]
                         checked[j] = True
 
             if count >= min_count:
-                out.append([centroid_x / count, centroid_y / count, count])
+                out.append([centroid_x / count, centroid_y / count, centroid_weight, count])
 
     return out
 
 
 ############################################################
-# programme
+# main
 ############################################################
 try:
     img_path = sys.argv[1]
     min_val_canny = int(sys.argv[2])
     max_val_canny = int(sys.argv[3])
     threshold_hough = int(sys.argv[4])
+    score_threshold = float(sys.argv[5])
 except:
     quit("Wrong command.\n"
          "Usage:\n"
@@ -271,7 +272,7 @@ except:
          "python vpdetector.py C:\\Users\\miros\\stack\\vpoints\\images\\5D4L1L1D_L.jpg 100 300 100 0.8\n")
 
 if not os.path.isfile(img_path) or not Path(img_path).suffix == '.jpg':
-    quit("Error:", img_path, "must be a .jpg file")
+    quit("Error:", img_path, "image must be .jpg")
 
 ############################################################
 # Read color image
@@ -355,7 +356,7 @@ for i in range(nb_components):
         img2[output == i + 1] = 255
 
 img_edges = img2
-del img2 # release memory
+del img2  # release memory
 
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_canny_after_refined.jpg"), img_edges)
 
@@ -454,7 +455,7 @@ img_intersec_viz[:, :, 2] = img_intersec.astype(np.uint8)
 for lineIdx in range(len(Ixy)):
     xIdx = int(math.floor(Ixy[lineIdx][0]))
     yIdx = int(math.floor(Ixy[lineIdx][1]))
-    cv2.circle(img_intersec_viz, (xIdx, yIdx), int(8), (0, 255, 0), 1)
+    cv2.circle(img_intersec_viz, (xIdx, yIdx), int(8), (0, 255, 0), 2)
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_Ixy.jpg"), img_intersec_viz)
 del img_intersec_viz
 print("done.", flush=True)
@@ -464,10 +465,9 @@ print("mean shift...", end=" ", flush=True)
 
 start_time = time.time()
 
-p_xy = mean_shift(img_intersec, MS_D_XY, MS_MAXITER,
-                  MS_EPSILON2)  # TODO output weights too w_xy that correspond to each location
+p_xy, w_xy = mean_shift(img_intersec, MS_D_XY, MS_MAXITER, MS_EPSILON2)
 
-print("done. %d locations, %ssec" % (len(p_xy), time.time() - start_time), flush=True)
+print("done. %d locations %d weights, %ssec" % (len(p_xy), len(w_xy), time.time() - start_time), flush=True)
 
 ########################################################################################################
 print("plot converged intersections...", end=" ", flush=True)
@@ -491,23 +491,28 @@ print("done. %ssec" % (time.time() - start_time), flush=True)
 
 #######################################
 print("extract...", end=" ", flush=True)
-clusters = extract(lab, p_xy, CLUSTER_MIN_COUNT)
+clusters = extract(lab, p_xy, w_xy, CLUSTER_MIN_COUNT)
 print("done.", flush=True)
 print(len(clusters), "clusters found", flush=True)
-clusters.sort(key=lambda x: x[2], reverse=True)
+clusters.sort(key=lambda x: x[2],
+              reverse=True)  # sort them by placing highest weight first (0-x, 1-y, 2-total weight, 3-count)
 
 #######################################
-
+print("exporting vanishing points...", end="\n", flush=True)
 vpoints_viz = np.zeros(tuple(img_intersec_dimensions), dtype=np.uint8)
 vpoints_viz[:, :, 0] = img_gray.astype(np.uint8)
 vpoints_viz[:, :, 1] = img_gray.astype(np.uint8)
 vpoints_viz[:, :, 2] = img_gray.astype(np.uint8)
-for i in range(len(clusters)):
-    # print(clusters[i], flush=True)
-    plot_col = int(round(clusters[i][1]))
-    plot_row = int(round(clusters[i][0]))
-    cv2.circle(vpoints_viz, (plot_col, plot_row), int(round(math.sqrt(clusters[i][2]) / math.pi)), (0, 0, 255), -1)
 
-cv2.imwrite(os.path.join(out_dir_path, img_name + "_vpoints.jpg"), vpoints_viz)
+for i in range(len(clusters)):
+    if clusters[i][2] >= score_threshold * clusters[0][2]:
+        print(i, ":\t", clusters[i], flush=True)
+        plot_col = int(round(clusters[i][1]))
+        plot_row = int(round(clusters[i][0]))
+        cv2.circle(vpoints_viz, (plot_col, plot_row), int(round(math.sqrt(clusters[i][2]) / math.pi)), (0, 0, 255), 2)
+
+out_file_path = os.path.join(out_dir_path, img_name + "_vpoints.jpg")
+print("exported in:\n", out_file_path, flush=True)
+cv2.imwrite(out_file_path, vpoints_viz)
 del vpoints_viz
 del img_gray
