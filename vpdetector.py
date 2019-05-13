@@ -3,11 +3,8 @@ import sys
 import cv2
 import math
 import time
-import datetime
 import numpy as np
 from pathlib import Path
-from geometry import cross
-from geometry import modulus
 
 RESIZE_WIDTH = 512
 RESIZE_HEIGHT = 512
@@ -21,6 +18,23 @@ MS_MAXITER = 1000
 MS_EPSILON2 = 1e-6
 CLUSTER_DIST = 1
 CLUSTER_MIN_COUNT = 10
+GAUSSIAN_ANGLE_MEAN_DEG = 45
+GAUSSIAN_ANGLE_STD_DEG = 20
+
+
+############################################################
+# function definitions
+############################################################
+def cross(v1x, v1y, v2x, v2y):
+    return v1x * v2y - v1y * v2x
+
+
+def modulus(vx, vy):
+    return math.sqrt(vx * vx + vy * vy)
+
+
+def dot(v1x, v1y, v2x, v2y):
+    return v1x * v2x + v1y * v2y
 
 
 def get_angles(lines, nr_angles):
@@ -33,11 +47,16 @@ def get_angles(lines, nr_angles):
         print(alpha)
 
 
-def get_intersections(lines):
+def angle_gaussian_sensitivity(input_angle_deg, mean_deg, sigma_deg):
+    return np.exp(-(input_angle_deg - mean_deg) ** 2 / (2 * sigma_deg ** 2))
+
+
+def get_intersections(lines, angle_mean, angle_std):
     # https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
 
     intersection_coord = []
     intersection_weight = []
+    intersection_angle = []
     count = 0
 
     lines_count = len(lines)
@@ -77,20 +96,44 @@ def get_intersections(lines):
                 # isec2_x = qx + u * sx # intersection ver. 2
                 # isec2_y = qy + u * sy
 
+                p_isec_x = px - isec_x
+                p_isec_y = py - isec_y
+                p_isec_mod = modulus(p_isec_x, p_isec_y)
+
+                r_isec_x = (px + rx) - isec_x
+                r_isec_y = (py + ry) - isec_y
+                r_isec_mod = modulus(r_isec_x, r_isec_y)
+
+                q_isec_x = qx - isec_x
+                q_isec_y = qy - isec_y
+                q_isec_mod = modulus(q_isec_x, q_isec_y)
+
+                s_isec_x = (qx + sx) - isec_x
+                s_isec_y = (qy + sy) - isec_y
+                s_isec_mod = modulus(s_isec_x, s_isec_y)
+
+                isec_angle_deg = math.acos(
+                    dot(p_isec_x / p_isec_mod, p_isec_y / p_isec_mod, q_isec_x / q_isec_mod, q_isec_y / q_isec_mod)) * (
+                                             180.0 / math.pi)
+
                 # add if it is within the boundaries of the extended image
                 if 0 <= isec_x < w_ext and 0 <= isec_y < h_ext:
                     count += 1
                     intersection_coord.append([isec_x, isec_y])
-                    intersection_weight.append(r_mod + s_mod)
+                    intersection_angle.append(isec_angle_deg)
+                    intersection_weight_value = angle_gaussian_sensitivity(isec_angle_deg, angle_mean, angle_std)
+                    intersection_weight_value *= (r_mod / max(p_isec_mod, r_isec_mod)) * (
+                                s_mod / max(q_isec_mod, s_isec_mod))
+                    intersection_weight.append(intersection_weight_value)
 
-    return intersection_coord, intersection_weight
+    return intersection_coord, intersection_weight, intersection_angle
 
 
 def mean_shift(input_image, d_xy, maxiter, epsilon2):
     input_image_height = input_image.shape[0]
     input_image_width = input_image.shape[1]
 
-    input_image_list = input_image.tolist()  # works faster if used as list
+    input_image_list = input_image.tolist()  # retrieving values works way faster if used as list
 
     ms_xy = []
     for x in range(input_image_height):
@@ -136,7 +179,6 @@ def mean_shift(input_image, d_xy, maxiter, epsilon2):
 
 
 def clustering(p_xy, cluster_dist):
-
     cluster_dist2 = math.pow(cluster_dist, 2)
 
     ####
@@ -178,7 +220,6 @@ def clustering(p_xy, cluster_dist):
 
 
 def extract(labels, locs_xy, min_count):
-
     nr_locs = len(labels)
 
     checked = [False] * nr_locs
@@ -191,7 +232,7 @@ def extract(labels, locs_xy, min_count):
             centroid_y = locs_xy[i][1]
             count = 1
             checked[i] = True
-            for j in range(i+1, nr_locs):
+            for j in range(i + 1, nr_locs):
                 if not checked[j]:
                     if labels[j] == labels[i]:
                         centroid_x += locs_xy[j][0]
@@ -200,10 +241,13 @@ def extract(labels, locs_xy, min_count):
                         checked[j] = True
 
             if count >= min_count:
-                out.append([centroid_x/count, centroid_y/count, count])
+                out.append([centroid_x / count, centroid_y / count, count])
 
     return out
 
+
+############################################################
+# programme
 ############################################################
 try:
     img_path = sys.argv[1]
@@ -213,10 +257,18 @@ try:
 except:
     quit("Wrong command.\n"
          "Usage:\n"
-         "python vpdetector.py image_path min_val_canny max_val_canny threshold_hough\n"
-         "Example:\n"
-         "python vpdetector.py 5D4L1L1D_L.jpg 100 200 100\n"
-         "python vpdetector.py C:\\Users\\miros\\stack\\vpoints\\images\\5D4L1L1D_L.jpg 100 300 100\n")
+         "python vpdetector.py P1  P2  P3  P4  P5\n"
+         "----------------------------------------------------\n"
+         "Parameter legend:\n"
+         "P1 = image file name or full path (accepts only jpg extension)\n"
+         "P2 = canny edge detector: lower threshold, in [0, inf]\n"
+         "P3 = canny edge detector: upper threshold, in [0, inf]\n"
+         "P4 = hough_threshold, in [0, inf]\n"
+         "P5 = score_threshold, in [0, 1]\n"
+         "----------------------------------------------------\n"
+         "Example calls:\n"
+         "cd directory_containing_image; python vpdetector.py 5D4L1L1D_L.jpg 100 300 100 0.8\n"
+         "python vpdetector.py C:\\Users\\miros\\stack\\vpoints\\images\\5D4L1L1D_L.jpg 100 300 100 0.8\n")
 
 if not os.path.isfile(img_path) or not Path(img_path).suffix == '.jpg':
     quit("Error:", img_path, "must be a .jpg file")
@@ -261,7 +313,6 @@ cv2.imwrite(os.path.join(out_dir_path, img_name + "_uint8.jpg"), img_gray)
 # Find the edges in the image using canny detector
 img_edges = cv2.Canny(img_gray, min_val_canny, max_val_canny)
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_canny_before.jpg"), img_edges)
-# del img_gray  # release memory
 
 # Crop the border edges caused by the image extension
 mask = np.zeros(img_edges.shape, np.uint8)
@@ -304,7 +355,7 @@ for i in range(nb_components):
         img2[output == i + 1] = 255
 
 img_edges = img2
-del img2
+del img2 # release memory
 
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_canny_after_refined.jpg"), img_edges)
 
@@ -350,8 +401,10 @@ cv2.imwrite(os.path.join(out_dir_path, img_name + "_lines.jpg"), viz_lines)
 del viz_lines  # release memory
 
 #######################################
-Ixy, Iw = get_intersections(lines)
-print(len(Ixy), "intersections found")
+Ixy, Iw, Iang = get_intersections(lines, GAUSSIAN_ANGLE_MEAN_DEG, GAUSSIAN_ANGLE_STD_DEG)
+print(len(Ixy), "intersections found", flush=True)
+print("weight:", np.amin(Iw), " -- ", np.amax(Iw), flush=True)
+print("angles:", np.amin(Iang), " -- ", np.amax(Iang), flush=True)
 
 #######################################
 # visualize intersection points
@@ -377,7 +430,8 @@ for lineIdx in range(len(Ixy)):
         (lineIdx + 1), len(Ixy), Ixy[lineIdx][0], xIdx, Ixy[lineIdx][1], yIdx, Iw[lineIdx]))
     sys.stdout.flush()
 
-print("\naccumulated ", np.sum(img_intersec > 0), " | ", len(Ixy), " ", (100.0 * np.sum(img_intersec > 0) / len(Ixy)), "%")
+print("\naccumulated ", np.sum(img_intersec > 0), " | ", len(Ixy), " ", (100.0 * np.sum(img_intersec > 0) / len(Ixy)),
+      "%")
 
 img_intersec_min = np.amin(img_intersec)
 img_intersec_max = np.amax(img_intersec)
@@ -386,7 +440,7 @@ img_intersec_max = np.amax(img_intersec)
 img_intersec = 255 * ((img_intersec - img_intersec_min) / (img_intersec_max - img_intersec_min))
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_intersec)
 
-print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)))
+print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)), flush=True)
 
 ########################################################################################################
 print("plot intersections...", end=" ", flush=True)
@@ -410,7 +464,8 @@ print("mean shift...", end=" ", flush=True)
 
 start_time = time.time()
 
-p_xy = mean_shift(img_intersec, MS_D_XY, MS_MAXITER, MS_EPSILON2)
+p_xy = mean_shift(img_intersec, MS_D_XY, MS_MAXITER,
+                  MS_EPSILON2)  # TODO output weights too w_xy that correspond to each location
 
 print("done. %d locations, %ssec" % (len(p_xy), time.time() - start_time), flush=True)
 
@@ -448,10 +503,10 @@ vpoints_viz[:, :, 0] = img_gray.astype(np.uint8)
 vpoints_viz[:, :, 1] = img_gray.astype(np.uint8)
 vpoints_viz[:, :, 2] = img_gray.astype(np.uint8)
 for i in range(len(clusters)):
-    print(clusters[i], flush=True)
+    # print(clusters[i], flush=True)
     plot_col = int(round(clusters[i][1]))
     plot_row = int(round(clusters[i][0]))
-    cv2.circle(vpoints_viz, (plot_col, plot_row), int(round(math.sqrt(clusters[i][2])/math.pi)), (0, 0, 255), -1)
+    cv2.circle(vpoints_viz, (plot_col, plot_row), int(round(math.sqrt(clusters[i][2]) / math.pi)), (0, 0, 255), -1)
 
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_vpoints.jpg"), vpoints_viz)
 del vpoints_viz
