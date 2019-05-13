@@ -9,16 +9,18 @@ from pathlib import Path
 from geometry import cross
 from geometry import modulus
 
-
-MIN_LINE_LENGTH = 100
-MIN_SIZE_CONN_COMPONENT = 100
+RESIZE_WIDTH = 512
+RESIZE_HEIGHT = 512
+MIN_LINE_LENGTH = 50
+MIN_SIZE_CONN_COMPONENT = 40
 MAX_LINE_GAP = 5
-GAUSS_BLUR = 9  # pixels
+GAUSS_BLUR = 9
 SMALL_POSITIVE_INTENSITY = 1e-6
-MS_D_XY = 3
-MS_MAXITER = 5
-MS_EPSILON2 = 1e-2
-CLUSTER_DIST = 5
+MS_D_XY = 20
+MS_MAXITER = 1000
+MS_EPSILON2 = 1e-6
+CLUSTER_DIST = 1
+CLUSTER_MIN_COUNT = 10
 
 
 def get_angles(lines, nr_angles):
@@ -31,8 +33,9 @@ def get_angles(lines, nr_angles):
         print(alpha)
 
 
-# https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
 def get_intersections(lines):
+    # https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
+
     intersection_coord = []
     intersection_weight = []
     count = 0
@@ -93,9 +96,6 @@ def mean_shift(input_image, d_xy, maxiter, epsilon2):
     for x in range(input_image_height):
         for y in range(input_image_width):
 
-            # sys.stdout.write("%d%%   \r" % (100 * x / (input_image_height - 1)))
-            # sys.stdout.flush()
-
             if input_image_list[x][y] > 0:
 
                 conv_x = x
@@ -136,6 +136,7 @@ def mean_shift(input_image, d_xy, maxiter, epsilon2):
 
 
 def clustering(p_xy, cluster_dist):
+
     cluster_dist2 = math.pow(cluster_dist, 2)
 
     ####
@@ -143,48 +144,65 @@ def clustering(p_xy, cluster_dist):
     for i in range(len(p_xy)):
         nbridx.append([])
 
-    bnd = len(p_xy)
+    nr_points = len(p_xy)
     ####
-    start_time = time.time()
-    for i in range(bnd):
-        for j in range(i + 1, bnd):
-            cd = math.pow(p_xy[i][0] - p_xy[j][0], 2) + math.pow(p_xy[i][1] - p_xy[j][1], 2)
 
+    for i in range(nr_points):
+        for j in range(i + 1, nr_points):
+            cd = math.pow(p_xy[i][0] - p_xy[j][0], 2) + math.pow(p_xy[i][1] - p_xy[j][1], 2)
             if cd <= cluster_dist2:
                 nbridx[i].append(j)
                 nbridx[j].append(i)
 
-    print("stage 2: %ssec" % (time.time() - start_time))
-    sys.stdout.flush()
-
     ####
-    labels = np.zeros(bnd, dtype=np.int32)
-    for i in range(len(labels)):
+    labels = np.zeros(nr_points, dtype=np.int32)
+    for i in range(nr_points):
         labels[i] = i
 
-    # t0 = datetime.datetime.now()
-    # t1 = datetime.datetime.now()
-    # dt = t1 - t0
-    # print("stage 3: ", (dt.microseconds / 1000), "ms")
-
     ####
-
-    for i in range(len(p_xy)):
+    for i in range(nr_points):
         for nbri in range(len(nbridx[i])):
             j = nbridx[i][nbri]
             if labels[j] != labels[i]:
                 curr_label = labels[j]
-                newLabel = labels[i]
+                new_label = labels[i]
 
-                labels[j] = newLabel
+                labels[j] = new_label
 
-                # set all that were curr_label to newLabel
-                for k in range(len(labels)):
+                # set all that were curr_label to new_label
+                for k in range(nr_points):
                     if labels[k] == curr_label:
-                        labels[k] = newLabel
+                        labels[k] = new_label
 
     return labels
 
+
+def extract(labels, locs_xy, min_count):
+
+    nr_locs = len(labels)
+
+    checked = [False] * nr_locs
+
+    out = []
+
+    for i in range(nr_locs):
+        if not checked[i]:
+            centroid_x = locs_xy[i][0]
+            centroid_y = locs_xy[i][1]
+            count = 1
+            checked[i] = True
+            for j in range(i+1, nr_locs):
+                if not checked[j]:
+                    if labels[j] == labels[i]:
+                        centroid_x += locs_xy[j][0]
+                        centroid_y += locs_xy[j][1]
+                        count += 1
+                        checked[j] = True
+
+            if count >= min_count:
+                out.append([centroid_x/count, centroid_y/count, count])
+
+    return out
 
 ############################################################
 try:
@@ -203,11 +221,16 @@ except:
 if not os.path.isfile(img_path) or not Path(img_path).suffix == '.jpg':
     quit("Error:", img_path, "must be a .jpg file")
 
+############################################################
 # Read color image
 img_color = cv2.imread(img_path, cv2.IMREAD_COLOR)
 
 img_name = os.path.splitext(os.path.basename(img_path))[0]
-print("Read image", img_name, "\t", type(img_color), "\tdimensions:", img_color.shape)
+print("Read image", img_name, type(img_color), "dimensions:", img_color.shape)
+
+# Resize input image
+img_color = cv2.resize(img_color, (RESIZE_WIDTH, RESIZE_HEIGHT))
+print("Resized", img_name, type(img_color), "dimensions:", img_color.shape)
 
 # Create directory with exported results
 img_dir = os.path.dirname(img_path)
@@ -223,21 +246,22 @@ if not os.path.exists(out_dir_path):
 
 h, w, l = img_color.shape
 
-# Extend color image (2x original size)
+# Extend input image field (2x original size)
 img_color = cv2.copyMakeBorder(img_color, int(h / 2), int(h / 2), int(w / 2), int(w / 2), cv2.BORDER_CONSTANT,
                                value=[255, 255, 255])
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_input.jpg"), img_color)
 
 h_ext, w_ext, l_ext = img_color.shape
 
-# Convert to gray-scale
+# Convert to gray-scale for further processing
 img_gray = cv2.cvtColor(img_color, cv2.COLOR_BGR2GRAY)
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_uint8.jpg"), img_gray)
 
+############################################################
 # Find the edges in the image using canny detector
 img_edges = cv2.Canny(img_gray, min_val_canny, max_val_canny)
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_canny_before.jpg"), img_edges)
-del img_gray  # release memory
+# del img_gray  # release memory
 
 # Crop the border edges caused by the image extension
 mask = np.zeros(img_edges.shape, np.uint8)
@@ -259,6 +283,7 @@ cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_canny_after.jpg"), img
 
 img_edges = ((img_edges > 124).astype(int) * 255).astype(np.uint8)  # binary image: 0 and 255 values only
 
+############################################################
 # https://stackoverflow.com/questions/42798659/how-to-remove-small-connected-objects-using-opencv
 nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(img_edges, connectivity=8)
 sizes = stats[1:, -1]
@@ -269,8 +294,6 @@ img2 = np.zeros(img_edges.shape, dtype=np.uint8)
 # Alternative (slower) connected components implementation
 # labeled, nr_objects = ndimage.label(img_edges)
 # for label in range(nr_objects):
-#     sys.stdout.write("pruning components: %d%%   \r" % (100 * (label + 1) / nr_objects))
-#     sys.stdout.flush()
 #     if np.sum(labeled == label + 1) >= MIN_SIZE_CONN_COMPONENT:
 #         img2[labeled == label + 1] = 255
 
@@ -366,8 +389,7 @@ cv2.imwrite(os.path.join(out_dir_path, img_name + "_img_intersec.jpg"), img_inte
 print("\nmin = %f max = %f" % (np.amin(img_intersec), np.amax(img_intersec)))
 
 ########################################################################################################
-print("plot intersections...", end=" ")
-sys.stdout.flush()
+print("plot intersections...", end=" ", flush=True)
 img_intersec_dimensions = list(img_intersec.shape)
 img_intersec_dimensions.append(3)  # color image needed for color plots
 
@@ -381,41 +403,56 @@ for lineIdx in range(len(Ixy)):
     cv2.circle(img_intersec_viz, (xIdx, yIdx), int(8), (0, 255, 0), 1)
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_Ixy.jpg"), img_intersec_viz)
 del img_intersec_viz
-print("done.")
-sys.stdout.flush()
+print("done.", flush=True)
 
 ########################################################################################################
-print("mean shift...", end=" ")
-sys.stdout.flush()
+print("mean shift...", end=" ", flush=True)
 
 start_time = time.time()
 
 p_xy = mean_shift(img_intersec, MS_D_XY, MS_MAXITER, MS_EPSILON2)
 
-print("done. %d elements, %ssec" % (len(p_xy), time.time() - start_time))
-sys.stdout.flush()
+print("done. %d locations, %ssec" % (len(p_xy), time.time() - start_time), flush=True)
 
 ########################################################################################################
-
-# plot converged intersections
+print("plot converged intersections...", end=" ", flush=True)
 img_intersec_viz = np.zeros(tuple(img_intersec_dimensions), dtype=np.uint8)
 img_intersec_viz[:, :, 0] = img_intersec.astype(np.uint8)
 img_intersec_viz[:, :, 1] = img_intersec.astype(np.uint8)
 img_intersec_viz[:, :, 2] = img_intersec.astype(np.uint8)
 
 for i in range(len(p_xy)):
-    cv2.circle(img_intersec_viz, (int(p_xy[i][1]), int(p_xy[i][0])), int(8), (0, 255, 255), 1)
+    cv2.circle(img_intersec_viz, (int(p_xy[i][1]), int(p_xy[i][0])), int(1), (0, 255, 255), -1)
 
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_Pxy.jpg"), img_intersec_viz)
 del img_intersec_viz
+print("done.", flush=True)
 
 #######################################
-print("clustering...", end=" ")
-sys.stdout.flush()
+print("clustering...", end=" ", flush=True)
+start_time = time.time()
 lab = clustering(p_xy, CLUSTER_DIST)
-print("done.")
-sys.stdout.flush()
+print("done. %ssec" % (time.time() - start_time), flush=True)
 
 #######################################
-print("estimation...", end=" ")
-print("done.")
+print("extract...", end=" ", flush=True)
+clusters = extract(lab, p_xy, CLUSTER_MIN_COUNT)
+print("done.", flush=True)
+print(len(clusters), "clusters found", flush=True)
+clusters.sort(key=lambda x: x[2], reverse=True)
+
+#######################################
+
+vpoints_viz = np.zeros(tuple(img_intersec_dimensions), dtype=np.uint8)
+vpoints_viz[:, :, 0] = img_gray.astype(np.uint8)
+vpoints_viz[:, :, 1] = img_gray.astype(np.uint8)
+vpoints_viz[:, :, 2] = img_gray.astype(np.uint8)
+for i in range(len(clusters)):
+    print(clusters[i], flush=True)
+    plot_col = int(round(clusters[i][1]))
+    plot_row = int(round(clusters[i][0]))
+    cv2.circle(vpoints_viz, (plot_col, plot_row), int(round(math.sqrt(clusters[i][2])/math.pi)), (0, 0, 255), -1)
+
+cv2.imwrite(os.path.join(out_dir_path, img_name + "_vpoints.jpg"), vpoints_viz)
+del vpoints_viz
+del img_gray
