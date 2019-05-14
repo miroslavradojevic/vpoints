@@ -9,8 +9,6 @@ from pathlib import Path
 
 RESIZE_WIDTH = 512
 RESIZE_HEIGHT = 512
-MIN_LINE_LENGTH = 30
-MIN_SIZE_CONN_COMPONENT = 20  # slightly less than MIN_LINE_LENGTH
 MAX_LINE_GAP = 5
 GAUSS_BLUR = 7
 SMALL_POSITIVE_VALUE = 1e-6
@@ -254,10 +252,11 @@ def extract(labels, locs_xy, wgts_xy, min_count):
 
 parser = argparse.ArgumentParser(description='Detect vanishing points in jpg image.')
 parser.add_argument('img', nargs='+', help='Image jpg file')
-parser.add_argument("--cannyMin", nargs='?', type=int, help='Canny edge detector: lower threshold [0, inf]',
-                    default=100)
-parser.add_argument("--cannyMax", nargs='?', type=int, help='Canny edge detector: upper threshold [0, inf]',
-                    default=300)
+parser.add_argument("--cannyMin", nargs='?', type=int, help='Canny edge detector: lower threshold [0, inf], default 100', default=100)
+parser.add_argument("--cannyMax", nargs='?', type=int, help='Canny edge detector: upper threshold [0, inf], default 300', default=300)
+parser.add_argument("--houghTreshold", nargs='?', type=int, help='Hough t. threshold [0, inf], default 100', default=100)
+parser.add_argument("--houghMinLineLen", nargs='?', type=int, help='Hough t. min. line length [0, inf], default 50', default=50)
+parser.add_argument("--scoreThreshold", nargs='?', type=float, help='Score threshold [0, 1], default 0.8', default=0.8)
 
 args = parser.parse_args()
 
@@ -265,35 +264,8 @@ img_path = args.img[1]
 min_val_canny = args.cannyMin
 max_val_canny = args.cannyMax
 threshold_hough = args.houghTreshold
-
-print("img_path=", img_path)
-print("min_val_canny=", min_val_canny)
-print("max_val_canny=", max_val_canny)
-
-if True:
-    quit("exiting")
-
-try:
-    # img_path = sys.argv[1]
-    # min_val_canny = int(sys.argv[2])
-    # max_val_canny = int(sys.argv[3])
-    threshold_hough = int(sys.argv[4])
-    score_threshold = float(sys.argv[5])
-except:
-    quit("Wrong command.\n"
-         "Usage:\n"
-         "python vpdetector.py P1  P2  P3  P4  P5\n"
-         "----------------------------------------------------\n"
-         "Parameter legend:\n"
-         "P1 = image file name or full path (accepts only jpg extension)\n"
-         "P2 = canny edge detector: lower threshold, in [0, inf]\n"
-         "P3 = canny edge detector: upper threshold, in [0, inf]\n"
-         "P4 = hough_threshold, in [0, inf]\n"
-         "P5 = score_threshold, in [0, 1]\n"
-         "----------------------------------------------------\n"
-         "Example calls:\n"
-         "cd directory_containing_image; python vpdetector.py 5D4L1L1D_L.jpg 100 300 100 0.8\n"
-         "python vpdetector.py C:\\Users\\miros\\stack\\vpoints\\images\\5D4L1L1D_L.jpg 100 300 100 0.8\n")
+min_line_length_hough = args.houghMinLineLen
+score_threshold = args.scoreThreshold
 
 if not os.path.isfile(img_path) or not Path(img_path).suffix == '.jpg':
     quit("Error:", img_path, "image must be .jpg")
@@ -311,10 +283,14 @@ print("Resized", img_name, type(img_color), "dimensions:", img_color.shape)
 
 # Create directory with exported results
 img_dir = os.path.dirname(img_path)
-out_dir_name = "VPDET_" + time.strftime("%Y%m%d-%H%M%S") + "_" + img_name
+out_dir_name = "VPDET_" + time.strftime("%Y%m%d-%H%M%S")
 
-for arg_idx in range(2, len(sys.argv)):
-    out_dir_name += "_" + str(sys.argv[arg_idx])
+for k in args.__dict__:  # args.__dict__ instead of vars(args)
+    if args.__dict__[k] is not None:
+        if type(args.__dict__[k]) is list:  # file argument
+            out_dir_name += "_" + str(os.path.splitext(os.path.basename(args.__dict__[k][1]))[0])
+        else:
+            out_dir_name += "_" + str(args.__dict__[k])
 
 out_dir_path = os.path.join(img_dir, out_dir_name)
 
@@ -373,10 +349,11 @@ img2 = np.zeros(img_edges.shape, dtype=np.uint8)
 #     if np.sum(labeled == label + 1) >= MIN_SIZE_CONN_COMPONENT:
 #         img2[labeled == label + 1] = 255
 
+MIN_SIZE_CONN_COMPONENT = (min_line_length_hough-10) if (min_line_length_hough-10 > 5) else 5
 for i in range(nb_components):
     sys.stdout.write("pruning c-components: %d%%   \r" % (100 * (i + 1) / nb_components))
     sys.stdout.flush()
-    if sizes[i] >= MIN_SIZE_CONN_COMPONENT:
+    if sizes[i] >= MIN_SIZE_CONN_COMPONENT: # remove those slightly smaller than minimum line
         img2[output == i + 1] = 255
 
 img_edges = img2
@@ -389,7 +366,7 @@ img_edges = cv2.GaussianBlur(img_edges, (GAUSS_BLUR, GAUSS_BLUR), 0)
 cv2.imwrite(os.path.join(out_dir_path, img_name + "_edges_blurred.jpg"), img_edges)
 
 # Detect points that form a line
-lines = cv2.HoughLinesP(img_edges, 1, np.pi / 90, threshold_hough, MAX_LINE_GAP, MIN_LINE_LENGTH)
+lines = cv2.HoughLinesP(img_edges, 1, np.pi / 90, threshold_hough, MAX_LINE_GAP, min_line_length_hough)
 
 if lines is None or len(lines) == 0:
     quit("error: no lines extracted")
@@ -536,7 +513,7 @@ for i in range(len(clusters)):
         cv2.circle(vpoints_viz, (plot_col, plot_row), int(round(math.sqrt(clusters[i][2]) / math.pi)), (0, 0, 255), 2)
 
 out_file_path = os.path.join(out_dir_path, img_name + "_vpoints.jpg")
-print("exported in:\n", out_file_path, flush=True)
+print("result exported in:\n", out_file_path, flush=True)
 cv2.imwrite(out_file_path, vpoints_viz)
 del vpoints_viz
 del img_gray
