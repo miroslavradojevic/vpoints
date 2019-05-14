@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import cv2
@@ -9,7 +10,7 @@ from pathlib import Path
 RESIZE_WIDTH = 512
 RESIZE_HEIGHT = 512
 MIN_LINE_LENGTH = 30
-MIN_SIZE_CONN_COMPONENT = 20 # slightly less than MIN_LINE_LENGTH
+MIN_SIZE_CONN_COMPONENT = 20  # slightly less than MIN_LINE_LENGTH
 MAX_LINE_GAP = 5
 GAUSS_BLUR = 7
 SMALL_POSITIVE_VALUE = 1e-6
@@ -137,6 +138,7 @@ def mean_shift(input_image, d_xy, maxiter, epsilon2):
 
     ms_xy = []
     w_xy = []  # retain the weights of the converged locations
+
     for x in range(input_image_height):
         for y in range(input_image_width):
 
@@ -249,10 +251,32 @@ def extract(labels, locs_xy, wgts_xy, min_count):
 ############################################################
 # main
 ############################################################
+
+parser = argparse.ArgumentParser(description='Detect vanishing points in jpg image.')
+parser.add_argument('img', nargs='+', help='Image jpg file')
+parser.add_argument("--cannyMin", nargs='?', type=int, help='Canny edge detector: lower threshold [0, inf]',
+                    default=100)
+parser.add_argument("--cannyMax", nargs='?', type=int, help='Canny edge detector: upper threshold [0, inf]',
+                    default=300)
+
+args = parser.parse_args()
+
+img_path = args.img[1]
+min_val_canny = args.cannyMin
+max_val_canny = args.cannyMax
+threshold_hough = args.houghTreshold
+
+print("img_path=", img_path)
+print("min_val_canny=", min_val_canny)
+print("max_val_canny=", max_val_canny)
+
+if True:
+    quit("exiting")
+
 try:
-    img_path = sys.argv[1]
-    min_val_canny = int(sys.argv[2])
-    max_val_canny = int(sys.argv[3])
+    # img_path = sys.argv[1]
+    # min_val_canny = int(sys.argv[2])
+    # max_val_canny = int(sys.argv[3])
     threshold_hough = int(sys.argv[4])
     score_threshold = float(sys.argv[5])
 except:
