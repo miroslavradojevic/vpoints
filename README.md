@@ -1,7 +1,8 @@
 ## Vanishing point detection
 #### Implementation using Python and OpenCV library
-Script *vpdetector.py* implements the method.  
-###### Command takes up to 5 parameters (format: --parameterName value) and compulsory image path
+Script **vpdetector.py** implements the method.  
+
+**vpdetector.py** takes up to 5 parameters (format: --parameterName value) and compulsory image path
 If a parameter is not submitted, default value is used. 
 
 ###### Usage 
